@@ -1,0 +1,26 @@
+PAINEL LOCAL DE WHATSAPP
+
+Acesse http://127.0.0.1:18765/
+
+Para iniciar novamente depois de reiniciar o computador, execute Iniciar-WhatsApp.cmd.
+Mantenha a pasta deste projeto no lugar atual. Docker e Node precisam continuar instalados.
+Para reconectar, abra o botão de conexão e clique em Gerar QR code. O código é renovado automaticamente enquanto a janela estiver aberta.
+Se atualizar o painel durante uma tentativa, gere novamente o QR code antes de escanear.
+
+Botão direito em uma conversa: fixar, arquivar, marcar como não lida, silenciar e etiquetas.
+Engrenagem na lateral: preferências, sons, popup dentro do painel, etiquetas, respostas rápidas e automações.
+Relógio na lateral: agendamentos e lembretes.
+Estrela: mensagens favoritas. Lupa: busca no histórico.
+
+Etiquetas, fixações, favoritos, notas e etapas são próprios deste painel. Arquivar e marcar como lida/não lida também tentam sincronizar com o WhatsApp; falhas são informadas.
+As automações começam desativadas. Configure os textos e ative se desejar.
+Horários de atendimento e agendamentos usam o horário de Brasília.
+O computador, Docker e o serviço do painel precisam permanecer ligados para executar envios agendados e respostas automáticas.
+Se um envio passar mais de 15 minutos do horário com o serviço desligado, ele fica sinalizado para reagendar. Falhas não causam reenvio automático; confira a conversa antes de criar uma nova tentativa.
+Arquivos têm limite de 8 MB neste ambiente de teste. Gravação de áudio exige permissão de microfone no navegador.
+As mensagens disponíveis dependem do histórico sincronizado pela Evolution API.
+
+PESQUISA
+A caixa principal "Pesquisar" encontra contatos por nome ou número e palavras-chave nas mensagens armazenadas. Os resultados de mensagens aparecem abaixo dos contatos; clique em um resultado para abrir e destacar a mensagem. A busca não diferencia acentos ou letras maiúsculas.
+A lupa no cabeçalho da conversa abre o campo "Pesquisar" restrito àquela conversa.
+Contatos com identificadores de número e LID confirmados como pertencentes à mesma pessoa aparecem em uma única conversa, com os históricos reunidos.

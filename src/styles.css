@@ -1,0 +1,69 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+@import "./styles/pitwall-ds.css";
+@import "./styles/pitwall.css";
+@import "./styles/whatsapp-panel.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Pitwall Design System.
+ * Fonte única de cores: src/styles/pitwall-ds.css (tokens do DS) +
+ * src/styles/pitwall.css (tokens propostos e classes de módulo).
+ * Os tokens shadcn abaixo são só PONTE para os tokens Pitwall — nunca cor literal.
+ * Tailwind aqui serve para layout/espaçamento, nunca para cor.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-display: "Mona Sans", system-ui, sans-serif;
+}
+
+/* PONTE shadcn → Pitwall (vale para dark e light, pois aponta para tokens) */
+:root,
+:root[data-theme="light"],
+.dark {
+  --radius: var(--r-tile);
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--panel);
+  --card-foreground: var(--fg);
+  --popover: var(--panel-2);
+  --popover-foreground: var(--fg);
+  --primary: var(--lime);
+  --primary-foreground: var(--lime-ink);
+  --secondary: var(--panel-2);
+  --secondary-foreground: var(--fg);
+  --muted: var(--inset);
+  --muted-foreground: var(--fg-2);
+  --accent: var(--lime-soft);
+  --accent-foreground: var(--fg);
+  --destructive: var(--crit);
+  --destructive-foreground: var(--fg);
+  --border: var(--line-2);
+  --input: var(--line-2);
+  --ring: var(--lime);
+}

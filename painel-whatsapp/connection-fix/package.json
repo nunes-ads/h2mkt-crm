@@ -1,0 +1,6 @@
+{
+  "name": "evolution-local-pairing-dependency",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": { "baileys": "7.0.0-rc14" }
+}

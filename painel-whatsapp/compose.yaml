@@ -1,0 +1,42 @@
+services:
+  api:
+    image: evolution-local-api:2.3.7-baileys-rc14
+    build:
+      context: ./connection-fix
+      dockerfile: Dockerfile.rc14
+    pull_policy: never
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file: .env
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - instances:/evolution/instances
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_DB: evolution
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - database:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis:/data
+volumes:
+  instances:
+  database:
+  redis:

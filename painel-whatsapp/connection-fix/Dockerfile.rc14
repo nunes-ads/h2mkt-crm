@@ -1,0 +1,12 @@
+FROM evoapicloud/evolution-api@sha256:1bd8afc4a6cf48822e6cf02469aeae7bd35a12a6b616eacd1291926307f4d339
+WORKDIR /opt/local-pairing-fix
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+COPY patch-rc14.cjs pairing-refresh.mjs ./
+RUN node patch-rc14.cjs /opt/local-pairing-fix/node_modules/baileys && \
+    node --check node_modules/baileys/lib/Socket/socket.js && \
+    node --check node_modules/baileys/lib/Socket/messages-recv.js && \
+    rm -r /evolution/node_modules/baileys && \
+    ln -s /opt/local-pairing-fix/node_modules/baileys /evolution/node_modules/baileys
+ENV LOCAL_PAIRING_DIAGNOSTICS=1
+WORKDIR /evolution

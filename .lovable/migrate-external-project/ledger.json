@@ -1,0 +1,19 @@
+{
+  "source": "plataforma_omega_final_1.zip",
+  "capabilities": [
+    {"capability":"code","source":"Updated React/Vite archive and accessible Claude voice prototype","outcome":"Voice cockpit adapted to existing TanStack/Pitwall with seven sections and explicitly local drafts; existing CRM preserved","status":"partially_verified","next_action":"Other prototype additions such as multi-view agenda and multi-cadence follow-up remain outside this voice delivery; real API behavior deferred by user"},
+    {"capability":"schema","source":"14 source SQL migrations","outcome":"commercial data destination Cloudfy requested; auth profiles on existing identity service","status":"blocked","next_action":"Provide Cloudfy URL and contract; no commercial schema substituted"},
+    {"capability":"records","source":"no record export","outcome":"migrate","status":"pending","next_action":"Provide CSV/JSON application records"},
+    {"capability":"auth identities","source":"source auth users not exported","outcome":"migrate with verified email and new passwords","status":"pending","next_action":"Provide original IDs and emails; verify first-login ownership"},
+    {"capability":"authorization","source":"team roles and memberships","outcome":"login gate, private profile RLS and separate read-own role table implemented","status":"verification_pending","next_action":"Create/invite first team account and verify authenticated profile writes and isolation"},
+    {"capability":"uploaded file bytes","source":"external storage","outcome":"preserve","status":"pending","next_action":"Inventory storage references and request missing bytes"},
+    {"capability":"Twilio/ElevenLabs","source":"source voice functions","outcome":"preserve providers and Hudson","status":"pending","next_action":"Link accounts securely, configure number and verify real calls"},
+    {"capability":"Evolution API","source":"WhatsApp source integration","outcome":"preserve","status":"pending","next_action":"Connect existing Evolution instance and verify send/receive"},
+    {"capability":"other providers","source":"Meta, Google, Mercado Livre and ERP source integrations","outcome":"preserve","status":"pending","next_action":"Inventory exact endpoints and credentials"},
+    {"capability":"public endpoints/callbacks/webhooks","source":"source functions","outcome":"preserve via signed server routes","status":"blocked","next_action":"Define Cloudfy durable storage and link provider credentials before receivers and cutover"},
+    {"capability":"schedules","source":"source cron SQL","outcome":"preserve","status":"pending","next_action":"Port schedules after delivery paths verified"},
+    {"capability":"secrets","source":"provider accounts","outcome":"secure connectors","status":"pending","next_action":"Link Twilio, ElevenLabs, Evolution and retained providers"},
+    {"capability":"cutover","source":"unpublished target","outcome":"publish and update callbacks","status":"pending","next_action":"Deploy receiver and update provider URLs"},
+    {"capability":"verification","source":"target workflows","outcome":"real authenticated end-to-end checks","status":"pending","next_action":"Verify login, isolation, persisted messages and real calls"}
+  ]
+}

@@ -1,0 +1,8 @@
+*
+!Dockerfile
+!patch-baileys.cjs
+!pairing-refresh.mjs
+!Dockerfile.rc14
+!patch-rc14.cjs
+!package.json
+!package-lock.json

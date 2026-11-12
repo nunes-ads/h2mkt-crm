@@ -1,0 +1,178 @@
+{
+  "projeto": "Painel local de WhatsApp",
+  "data": "2026-11-10",
+  "escopo": "Codigo e configuracoes de exemplo; sem dados pessoais e sem credenciais em uso.",
+  "excluiEsteManifesto": true,
+  "arquivos": [
+    {
+      "caminho": ".env.example",
+      "bytes": 1388,
+      "sha256": "8172cd43e92b5c9fbbe934caac2ecc6b2b880c357dd5ad9aceea1d627247aaea"
+    },
+    {
+      "caminho": ".gitignore",
+      "bytes": 360,
+      "sha256": "ca51002a226842fe92c18ca6e843eac721363116c57b0669e3a31ea76b4cb333"
+    },
+    {
+      "caminho": "Como-usar-o-painel.txt",
+      "bytes": 2182,
+      "sha256": "5e11129495c557970f7779f24431f61b0d27f4ced1e0f8c5a0e2922cdb1bca40"
+    },
+    {
+      "caminho": "Configurar-primeiro-uso.cmd",
+      "bytes": 59,
+      "sha256": "486b89153662fddef0f9b333e3985bebec39fa0931a567c1e7d04be7e1b29f98"
+    },
+    {
+      "caminho": "Iniciar-WhatsApp.cmd",
+      "bytes": 56,
+      "sha256": "7ab09e7b9cc162290ea0993aeea9dbcc7bc0ad41ead45de196a263c11668562c"
+    },
+    {
+      "caminho": "LEIA-ME.md",
+      "bytes": 4976,
+      "sha256": "a9a760eb95dc0c154f7ab27315a8156464e5ff37c78a08e0aca2c1253fa62964"
+    },
+    {
+      "caminho": "business.cjs",
+      "bytes": 17939,
+      "sha256": "0d6b6e09783ca4deacfe63593fc9f47036386c233d6a927bb6f303c8be5ce9fa"
+    },
+    {
+      "caminho": "business.test.cjs",
+      "bytes": 8882,
+      "sha256": "b8ae64a60f8045204b16a42dc08dd8d6460289895fea2a979c87292541600e75"
+    },
+    {
+      "caminho": "compose.yaml",
+      "bytes": 990,
+      "sha256": "dc720e91e5ef867485dd711490d7720f2d7d2c3e45a9d490d568198748edefbb"
+    },
+    {
+      "caminho": "configurar.cjs",
+      "bytes": 4431,
+      "sha256": "6a64a397e424e88691eaaff082c4232a922a4a370e223b4cd11713f4c5cff019"
+    },
+    {
+      "caminho": "connection-fix/.dockerignore",
+      "bytes": 120,
+      "sha256": "cd0c7e9b5dc50eea84c76099d6cfe3b43c50e6ae238f47d1c63a19ac321be931"
+    },
+    {
+      "caminho": "connection-fix/Dockerfile.rc14",
+      "bytes": 668,
+      "sha256": "6b8ca1ec5177dd718425e065a212a9c43ba4dc8f9008dd54d66f61d1ff8cbbbf"
+    },
+    {
+      "caminho": "connection-fix/README.md",
+      "bytes": 1474,
+      "sha256": "73b44d0a6af87626af5913e1e5998f1e27629b9272d4bb02d25bcb9c8bd4b720"
+    },
+    {
+      "caminho": "connection-fix/package-lock.json",
+      "bytes": 47138,
+      "sha256": "1e5b20ff8118e4d2d1328f7e75d7827e700766eac54b333101ae3a4338cf0b97"
+    },
+    {
+      "caminho": "connection-fix/package.json",
+      "bytes": 139,
+      "sha256": "71aafd683c3b78c687502f9b3792031fdd55c76e933b8350ed9c30a5f52af960"
+    },
+    {
+      "caminho": "connection-fix/pairing-refresh.mjs",
+      "bytes": 1770,
+      "sha256": "9a6a702996f84a50286a7cc5a2ea94faf3b2afcf8ee2546f598e3156ed877fd8"
+    },
+    {
+      "caminho": "connection-fix/patch-rc14.cjs",
+      "bytes": 4097,
+      "sha256": "cdfef9b1f565e1da3c7d85e29a3603045d2db6ad4099c3875a86f6f5557dae12"
+    },
+    {
+      "caminho": "connection-qr.cjs",
+      "bytes": 776,
+      "sha256": "cb4cb1d420790504e872fc0db56a2aaa4e8042619d9937017089f7fd48d54380"
+    },
+    {
+      "caminho": "connection.test.cjs",
+      "bytes": 3126,
+      "sha256": "89a2b8505f78cd2df665744e972660d94f72763b5985a693ef588f09360beda1"
+    },
+    {
+      "caminho": "exemplos/teste-whatsapp.html",
+      "bytes": 6978,
+      "sha256": "929228a459af311eee886316189530c35f9dac53eca6b0b5366fb4aa88d39e40"
+    },
+    {
+      "caminho": "identities.cjs",
+      "bytes": 1896,
+      "sha256": "0a537db0ef3d1fdde4df5b7d90f4e157a4d4b845446f4a480256277e0cc74276"
+    },
+    {
+      "caminho": "identity-search.test.cjs",
+      "bytes": 5662,
+      "sha256": "7e74e0695b4764678145a08b8d74c4591aaa915c6f44c54290ef55e3f0616d4b"
+    },
+    {
+      "caminho": "iniciar.cjs",
+      "bytes": 2014,
+      "sha256": "9e2e094668c0a7b37883c430aac35b7f2b0a18ebe3c33804603b22e00376f45b"
+    },
+    {
+      "caminho": "licencas/Baileys-MIT.txt",
+      "bytes": 1083,
+      "sha256": "0d814b3b15ae28401c32d3d0042c9537f1216be765850fdb36ad507a3cc90aa4"
+    },
+    {
+      "caminho": "painel.cjs",
+      "bytes": 18329,
+      "sha256": "e746c06b713f55b523bde434ef24a930717a82547ce51d239dfee7a9e353e8c3"
+    },
+    {
+      "caminho": "search-index.cjs",
+      "bytes": 6506,
+      "sha256": "f746ca8337d8de4357452cc5015cb05afd590cc0f003286a4ed908492e0783dd"
+    },
+    {
+      "caminho": "verificar-eventos.cjs",
+      "bytes": 1193,
+      "sha256": "a9c915fbc8370702b05e0083e0430b4d4ac33ee4e6dd247287eaf29aaa3efe6a"
+    },
+    {
+      "caminho": "web/app.js",
+      "bytes": 21885,
+      "sha256": "4164c7a2145fa1d71550ddafb3ba5e1d9b3f83b9d59839b0c0ca2d37afccf231"
+    },
+    {
+      "caminho": "web/business.css",
+      "bytes": 12797,
+      "sha256": "c0ebf9113e850d7ea6987689500a4fd8a109a66189dae7a2fafd894e1c58c890"
+    },
+    {
+      "caminho": "web/features.js",
+      "bytes": 38373,
+      "sha256": "58a690ee243cde2ffc5a2cae3602703e28c25ff72148facfd6d0b14d9e5be9d1"
+    },
+    {
+      "caminho": "web/index.html",
+      "bytes": 8277,
+      "sha256": "1480cdf4e566941712006bf9393246e3f1a752f462597f4e5a2b335000312d6c"
+    },
+    {
+      "caminho": "web/search.css",
+      "bytes": 2587,
+      "sha256": "e41651d5f7f7a7ea383dad982ac910e95139fefaf4d4978ca38b1d6f0c9badc7"
+    },
+    {
+      "caminho": "web/search.js",
+      "bytes": 9369,
+      "sha256": "86f1da9f96a06175e045b21893b3a6a74c310ea762fe3c1155df7b5c160c6c90"
+    },
+    {
+      "caminho": "web/style.css",
+      "bytes": 13350,
+      "sha256": "d0aa144854a2cc84d363eaad4b131fdcaf7a5f178205c4ec375cbe9a45610114"
+    }
+  ]
+}

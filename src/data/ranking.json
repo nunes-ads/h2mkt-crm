@@ -1,0 +1,565 @@
+{
+ "cats": [
+  {
+   "id": "LUBRIFICANTE",
+   "nome": "Lubrificante",
+   "un": "L",
+   "rs": [
+    1.25,
+    1.35,
+    1.45
+   ]
+  },
+  {
+   "id": "PNEU",
+   "nome": "Pneu",
+   "un": "un",
+   "rs": [
+    5,
+    6,
+    7
+   ]
+  },
+  {
+   "id": "FILTROS",
+   "nome": "Filtros",
+   "un": "un",
+   "rs": [
+    1,
+    1.1,
+    1.2
+   ]
+  },
+  {
+   "id": "SERVIÇO (ALINH./BALANC.)",
+   "nome": "Alinh./Balanc.",
+   "un": "serv",
+   "rs": [
+    5,
+    6,
+    7
+   ]
+  },
+  {
+   "id": "SHOW DE SERVIÇOS",
+   "nome": "Show de serviços",
+   "un": "un",
+   "rs": [
+    7,
+    7,
+    7
+   ]
+  }
+ ],
+ "equipes": [
+  {
+   "nome": "Matriz Call Center",
+   "arquivo": "001_Matriz_CallCenter_2510_0311.xlsx",
+   "periodo": "25/10 a 03/11",
+   "vend": [
+    {
+     "nome": "ELEN",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 307.85,
+       "meta": [
+        900,
+        1000,
+        1200
+       ]
+      },
+      "PNEU": {
+       "real": 55.0,
+       "meta": [
+        220,
+        270,
+        340
+       ]
+      },
+      "FILTROS": {
+       "real": 94.0,
+       "meta": [
+        250,
+        300,
+        340
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 48.0,
+       "meta": [
+        100,
+        120,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 3.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "KAIRY",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 76.05,
+       "meta": [
+        900,
+        1000,
+        1200
+       ]
+      },
+      "PNEU": {
+       "real": 6.0,
+       "meta": [
+        220,
+        270,
+        340
+       ]
+      },
+      "FILTROS": {
+       "real": 23.0,
+       "meta": [
+        250,
+        300,
+        340
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 9.0,
+       "meta": [
+        100,
+        120,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "LUCAS_HENRIQ",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 0.0,
+       "meta": [
+        900,
+        1000,
+        1200
+       ]
+      },
+      "PNEU": {
+       "real": 1.0,
+       "meta": [
+        220,
+        270,
+        340
+       ]
+      },
+      "FILTROS": {
+       "real": 0.0,
+       "meta": [
+        250,
+        300,
+        340
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 3.0,
+       "meta": [
+        100,
+        120,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "FELIPE_MACED",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 244.52,
+       "meta": [
+        900,
+        1000,
+        1200
+       ]
+      },
+      "PNEU": {
+       "real": 45.0,
+       "meta": [
+        220,
+        270,
+        340
+       ]
+      },
+      "FILTROS": {
+       "real": 86.0,
+       "meta": [
+        250,
+        300,
+        340
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 36.0,
+       "meta": [
+        100,
+        120,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 6.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "nome": "Matriz Call Center · Novatas",
+   "arquivo": "002_Matriz_CallCenter_Novatas_2510_0311.xlsx",
+   "periodo": "25/10 a 03/11",
+   "vend": [
+    {
+     "nome": "MAYSA",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 0.0,
+       "meta": [
+        450,
+        600,
+        750
+       ]
+      },
+      "PNEU": {
+       "real": 0.0,
+       "meta": [
+        120,
+        150,
+        170
+       ]
+      },
+      "FILTROS": {
+       "real": 0.0,
+       "meta": [
+        170,
+        220,
+        220
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 0.0,
+       "meta": [
+        80,
+        100,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "HANNA_LETICI",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 84.0,
+       "meta": [
+        450,
+        600,
+        750
+       ]
+      },
+      "PNEU": {
+       "real": 21.0,
+       "meta": [
+        120,
+        150,
+        170
+       ]
+      },
+      "FILTROS": {
+       "real": 19.0,
+       "meta": [
+        170,
+        220,
+        220
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 37.0,
+       "meta": [
+        80,
+        100,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 2.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "ANA_PAULA",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 103.7,
+       "meta": [
+        450,
+        600,
+        750
+       ]
+      },
+      "PNEU": {
+       "real": 5.0,
+       "meta": [
+        120,
+        150,
+        170
+       ]
+      },
+      "FILTROS": {
+       "real": 27.0,
+       "meta": [
+        170,
+        220,
+        220
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 6.0,
+       "meta": [
+        80,
+        100,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "KARINA_EVAN",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 0.0,
+       "meta": [
+        450,
+        600,
+        750
+       ]
+      },
+      "PNEU": {
+       "real": 0.0,
+       "meta": [
+        120,
+        150,
+        170
+       ]
+      },
+      "FILTROS": {
+       "real": 0.0,
+       "meta": [
+        170,
+        220,
+        220
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 0.0,
+       "meta": [
+        80,
+        100,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "FILIPE_FARIA",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 0.0,
+       "meta": [
+        450,
+        600,
+        750
+       ]
+      },
+      "PNEU": {
+       "real": 0.0,
+       "meta": [
+        120,
+        150,
+        170
+       ]
+      },
+      "FILTROS": {
+       "real": 0.0,
+       "meta": [
+        170,
+        220,
+        220
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 0.0,
+       "meta": [
+        80,
+        100,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "JAYSSA",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 0.0,
+       "meta": [
+        450,
+        600,
+        750
+       ]
+      },
+      "PNEU": {
+       "real": 0.0,
+       "meta": [
+        120,
+        150,
+        170
+       ]
+      },
+      "FILTROS": {
+       "real": 0.0,
+       "meta": [
+        170,
+        220,
+        220
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 0.0,
+       "meta": [
+        80,
+        100,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    },
+    {
+     "nome": "ERICK_BEZE",
+     "cats": {
+      "LUBRIFICANTE": {
+       "real": 9.0,
+       "meta": [
+        450,
+        600,
+        750
+       ]
+      },
+      "PNEU": {
+       "real": 0.0,
+       "meta": [
+        120,
+        150,
+        170
+       ]
+      },
+      "FILTROS": {
+       "real": 1.0,
+       "meta": [
+        170,
+        220,
+        220
+       ]
+      },
+      "SERVIÇO (ALINH./BALANC.)": {
+       "real": 0.0,
+       "meta": [
+        80,
+        100,
+        130
+       ]
+      },
+      "SHOW DE SERVIÇOS": {
+       "real": 0.0,
+       "meta": [
+        20,
+        30,
+        40
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

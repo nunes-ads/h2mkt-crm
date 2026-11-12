@@ -1,0 +1,46 @@
+# Implementação das regras — acompanhamento
+
+Data: 12/11/2026. Fonte: os 17 documentos da pasta `CRM - Regras de negócio`.
+
+## Situação desta entrega
+
+Foi iniciada a fase 1 definida no próprio roteiro. Há código de frontend e funções autenticadas para contatos, contratos verificáveis e correções nos acessos legados. **Não há implantação do banco operacional nesta entrega.** O AGENTS.md reserva alterações do banco e dos tipos gerados ao Lovable. O arquivo `docs/lovable-fase1.md` é a solicitação exata de provisionamento.
+
+O ambiente de produção não foi alterado nem publicado. Credenciais e contas administrativas não foram criadas. Ausência de banco ou permissão aparece na UI; não é substituída por sucesso fictício ou dados de demonstração.
+
+## Rastreabilidade
+
+| Regras / módulo                              | Implementação local nesta etapa                                                                                                                                                    | Dependência / próximo aceite                                                                                                    |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| RN-001–016: organizações e acesso            | Contratos de membership e escopos, UI somente com organizações devolvidas pelo servidor, consultas separadas por usuário/tenant, comandos autenticados; integração antiga restrita | Criar memberships, grants, RLS e auditoria no Lovable; teste direto entre dois tenants ainda necessário                         |
+| RN-017–019: cadastro e dedupe                | Formulário independente de conversas, normalização sem destruir original, validação, busca/paginação, contrato de conflitos                                                        | Unicidade e concorrência transacionais no banco                                                                                 |
+| RN-020: mesclar                              | Seleção de dois registros, escolha do principal, motivo, versões e chave de repetição                                                                                              | Transação de merge e conservação de todos os vínculos no banco                                                                  |
+| RN-021–024: identidades, origem, campos/tags | Cadastro separado do funil, origem inicial não editável, campos tipados, etiquetas                                                                                                 | Histórico de toques, múltiplos negócios/atendimentos e administração de campos no servidor                                      |
+| RN-025: importação                           | CSV/XLSX no navegador, mapeamento das colunas básicas, prévia, validação, repetidas/erros por linha, lotes até 500, retorno do processamento                                       | Importação persistente, dedupe com base existente e auditoria via RPC; mapeamento de campos personalizados ainda pendente       |
+| RN-026 e privacidade                         | Arquivar/restaurar, revisão de bloqueio de marketing e motivo; contratos separados                                                                                                 | Retenção, direitos do titular, anonimização, expurgo e aplicação de bloqueios em todos os envios                                |
+| RN-027–040: canais                           | Corrigida seleção arbitrária de instância; eliminada mesclagem automática por nome/foto; falha de texto restaura rascunho                                                          | Adaptador por tenant, webhooks assinados, idempotência, outbox, reconciliação, anexos persistentes e política do canal          |
+| RN-041–048: atendimento                      | Telas existentes preservadas; histórico temporário por usuário/conta; notas não entram na nova função de cadastro                                                                  | Separar conversa/atendimento no banco, transições, notas persistentes, transferência e encerramento auditado                    |
+| RN-049–057: filas e SLA                      | Configuração de demonstração existente                                                                                                                                             | Elegibilidade, capacidade, calendário, atribuição atômica e alertas persistentes                                                |
+| RN-058–068: funis                            | Kanban existente preservado como módulo em migração                                                                                                                                | Oportunidades independentes, requisitos de etapa, moeda, motivos de perda e histórico transacional                              |
+| RN-069–078: workflows                        | Removido envio autônomo disparado por flags de navegador                                                                                                                           | Executor durável, versões, limites, dedupe, retentativa, pausa, dead-letter e opt-out                                           |
+| IA                                           | Autenticação, autorização legada restrita, gateway único, limites de entrada, proibição de system pelo cliente, sugestão com revisão humana                                        | Base autorizada por tenant, quotas/rate limiting duráveis, métricas, trilha de modelos/prompts, handoff e política de autonomia |
+| Anúncios e atribuição                        | Origem inicial preservada no contrato                                                                                                                                              | Adaptadores, UTMs/toques, consentimento, dedupe de conversões e reconciliação de custo                                          |
+| Telefonia e tarefas                          | Espaço de voz e configurações originais preservados                                                                                                                                | Provedores, callbacks, gravações protegidas, consentimento e tarefas persistentes                                               |
+| Analytics                                    | Contagem paginada de contatos e exportação da página via permissão/auditoria contratadas                                                                                           | Fórmulas versionadas, eventos reais, fuso, moeda, denominadores e drill-down autorizado                                         |
+| API e segurança                              | Validação Zod, erros minimizados, chaves de repetição e versões, cache de sessão limpo no logout                                                                                   | Executar contrato no banco; rate limiting, observabilidade, filas e testes de carga                                             |
+
+## Decisões e dependências
+
+1. Banco operacional: proposta usa o Supabase já conectado. Se Cloudfy for fonte comercial obrigatória, fornecer contrato/documentação para decidir sincronização; não inferir equivalência com Supabase Auth.
+2. Administrador: identificar qual usuário confirmado receberá vínculos de organização e eventual `integration_admin` legado. Nenhum papel é criado automaticamente.
+3. Canal prioritário: Evolution existente pode ser administrado somente na instância definida pelo servidor. Definir provedor e política do canal de produção antes de liberar usuários de franquias.
+4. Antes das próximas fases: confirmar calendário e feriados, SLA, retenção por categoria, papéis/equipes, critérios de ganho/perda e autonomia permitida da IA.
+5. Não publicar o conector legado como multiempresa: sua proteção é administrativa global e temporária. Mensagens ainda dependem diretamente do provedor; não há outbox nesta etapa.
+
+## Validação
+
+Os testes locais cobrem normalização, payloads, escopos de UI, erros de contrato, segurança da integração legada, isolamento de caches e fluxos de formulário. Usam fixtures e mocks para os contratos remotos. Não substituem os testes RLS/SQL, integração de provedor e piloto real listados no documento de provisionamento.
+
+Resultados locais: 64 testes aprovados em 10 arquivos; TypeScript sem erros; build de produção aprovado. Lint aprovado nos módulos novos de CRM, cache, rota de contatos e testes adicionados. O projeto já tinha erros de TypeScript na Inbox; os que impediam a checagem foram corrigidos. A compilação ainda avisa sobre tamanho de chunks do projeto. Não houve teste com banco provisionado, usuários de duas organizações ou mensagens reais nesta etapa.
+
+No executor restrito, o Vitest precisou usar TEMP/TMP apontando para `node_modules/.cache/crm-test-temp`, pois a pasta temporária padrão recusava renomear arquivos. Não houve alteração nas permissões da máquina nem nas regras do sandbox.
