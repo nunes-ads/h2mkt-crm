@@ -565,20 +565,25 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
           const textoParaEnviar = cleanContent || res.replyText;
 
           // Envia resposta via Evolution API para o WhatsApp (APENAS o texto limpo, NUNCA os bastidores!)
-          await sendEvoMsg({
+          const result = await sendEvoMsg({
             data: {
               number: remoteJid,
               text: textoParaEnviar,
               accountId: activeAccount.id,
               expectedInstance: instanceName,
             },
-          }).catch((err) => console.warn("Aviso ao enviar via Evolution API:", err));
+          }).catch((err) => {
+            console.warn("Aviso ao enviar via Evolution API:", err);
+            return null;
+          });
 
+          const novaMsgId = result?.key?.id || `pending:${crypto.randomUUID()}`;
           const novaMsg: Mensagem = {
-            id: crypto.randomUUID(),
+            id: novaMsgId,
             kind: "vendedor",
             text: textoParaEnviar,
             t: hhmm(),
+            sentAt: Date.now(),
             nome: "Hudson (IA)",
           };
 
@@ -599,9 +604,14 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
               const novasTags = new Set(c.tags || []);
               if (bastidores?.etiqueta) novasTags.add(bastidores.etiqueta);
 
+              // Remove mensagens provisórias que possam ter o mesmo texto para evitar duplicata imediata
+              const msgsSemDuplicata = c.msgs.filter(
+                (m) => !(m.kind === "vendedor" && m.text.trim() === textoParaEnviar.trim() && m.id !== novaMsgId)
+              );
+
               return {
                 ...c,
-                msgs: [...c.msgs, novaMsg],
+                msgs: [...msgsSemDuplicata, novaMsg],
                 etapa: novaEtapa,
                 tags: Array.from(novasTags),
                 bastidores: bastidores || c.bastidores,

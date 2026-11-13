@@ -116,12 +116,42 @@ export function mergeWhatsAppHistory(
   for (const message of incoming) {
     const previous = messages.get(message.id);
     if (!previous) {
+      // Deduplica mensagens provisórias locais que têm o mesmo texto e tipo
+      for (const [existingId, existingMsg] of messages.entries()) {
+        if (
+          existingMsg.kind === message.kind &&
+          existingMsg.text.trim() === message.text.trim() &&
+          existingId !== message.id &&
+          (!existingMsg.sentAt || Math.abs((existingMsg.sentAt || 0) - (message.sentAt || 0)) < 180000)
+        ) {
+          messages.delete(existingId);
+          break;
+        }
+      }
       messages.set(message.id, message);
       continue;
     }
     const next = { ...previous, ...message, mediaUrl: message.mediaUrl ?? previous.mediaUrl };
     if (Object.entries(next).some(([key, value]) => value !== previous[key as keyof Mensagem]))
       messages.set(message.id, next);
+  }
+
+  // Remove duplicatas locais remanescentes com mesmo texto e tipo se uma delas não tiver sentAt
+  const seenTexts = new Map<string, string>();
+  for (const [id, msg] of Array.from(messages.entries())) {
+    const key = `${msg.kind}:${msg.text.trim()}`;
+    const seenId = seenTexts.get(key);
+    if (seenId) {
+      const seenMsg = messages.get(seenId);
+      if (seenMsg && !msg.sentAt) {
+        messages.delete(id);
+      } else if (seenMsg && !seenMsg.sentAt) {
+        messages.delete(seenId);
+        seenTexts.set(key, id);
+      }
+    } else {
+      seenTexts.set(key, id);
+    }
   }
   const byMessage = new Map<string, WhatsAppReaction[]>();
   for (const reaction of reactions) {

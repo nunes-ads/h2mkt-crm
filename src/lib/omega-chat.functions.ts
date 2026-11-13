@@ -61,6 +61,21 @@ export function parseAiOutput(content: string): ParsedAiResponse {
     };
   }
 
+  // 3. Remove chamadas de ferramentas suprimidas ou alucinadas pelo modelo
+  // Exemplo: [[SUPRESSED_TOOL_CALL: buscar_produtos(...)]] ou [[TOOL_CALL:...]]
+  cleanContent = cleanContent.replace(/\[\[(?:SUPRESSED_)?(?:TOOL_CALL|CALL|FUNCTION_CALL|TOOL)[\s\S]*?\]\]/gi, "");
+
+  // Remove blocos de código com nomes de ferramentas ou JSON pseudo-calls
+  cleanContent = cleanContent.replace(/```(?:json)?\s*\[\s*["'](?:buscar_produtos|gerar_codigo_agendamento|consultar_placa)[\s\S]*?\]\s*```/gi, "");
+  cleanContent = cleanContent.replace(/```(?:json)?\s*\{[\s\S]*?"(?:tool|function|buscar_produtos|gerar_codigo_agendamento)"[\s\S]*?\}\s*```/gi, "");
+  cleanContent = cleanContent.replace(/```(?:json)?\s*(?:buscar_produtos|gerar_codigo_agendamento)\([\s\S]*?\)\s*```/gi, "");
+
+  // Remove tags pseudo-XML
+  cleanContent = cleanContent.replace(/<(?:tool_call|call|function_call)>[\s\S]*?<\/(?:tool_call|call|function_call)>/gi, "");
+
+  // Remove linhas isoladas com chamadas de pseudo-funções
+  cleanContent = cleanContent.replace(/^\s*(?:buscar_produtos|gerar_codigo_agendamento|consultar_placa)\(.*?\)\s*$/gim, "");
+
   // Remove eventuais divisores "---" finais da mensagem do cliente
   cleanContent = cleanContent.replace(/---+$/, "").trim();
 
@@ -75,8 +90,14 @@ export function parseSuggestions(content: string): { cleanContent: string; sugge
 
 // System prompt combining WhatsApp guidelines with Grupo Ômega sales persona (Hudson)
 const buildSystemPrompt = (contactName?: string, contactPhone?: string, vehicle?: string) => {
+  const sanitizedRegras = regrasHudson
+    .replace(/- Não escreva nada antes de usar as ferramentas; use as que precisar e só então escreva a resposta final\./g, "")
+    .replace(/\(chame buscar_produtos[^)]*\)/g, "")
+    .replace(/\(chame gerar_codigo_agendamento[^)]*\)/g, "")
+    .replace(/Chame gerar_codigo_agendamento\./g, "Gere o código de agendamento na resposta.");
+
   return `Você é o HUDSON, consultor de vendas do Grupo Ômega (Omega Super Troca de Óleo e Omega Pneus), rede com mais de 28 unidades no DF e em Goiânia, com mais de 35 anos de mercado e mais de 472 mil clientes atendidos.
-Você auxilia um atendente da loja a redigir uma resposta para revisão.
+Você auxilia um atendente da loja a redigir uma resposta para o cliente no WhatsApp.
 
 📱 ESTILO WHATSAPP:
 - Respostas curtas (máximo 2 a 3 parágrafos curtos)
@@ -88,13 +109,20 @@ Você auxilia um atendente da loja a redigir uma resposta para revisão.
 - Ao final, sugira 2 ou 3 opções rápidas de resposta no formato:
 [[SUGESTÕES: Opção 1 | Opção 2 | Opção 3]]
 
+⚠️ REGRA OBRIGATÓRIA DE SAÍDA (SEM FERRAMENTAS / TOOL CALLS):
+- Você NÃO possui ferramentas/functions executáveis nesta interface.
+- NUNCA escreva tags como [[SUPRESSED_TOOL_CALL:...]], [[TOOL_CALL:...]] ou [[CALL:...]].
+- NUNCA gere blocos de código com JSON de ferramentas como \`\`\`json ["buscar_produtos"] \`\`\` ou similar.
+- Fale DIRETAMENTE com o cliente em português coloquial e acolhedor de WhatsApp.
+- Se for falar de pneus (ex: 185/65 R14), fale diretamente as opções (Delmax, XBRI, Pirelli, etc.) e valores de forma natural no texto.
+
 👤 DADOS DO CLIENTE ATUAL:
 - Nome do contato: ${contactName || "Cliente"}
 - Telefone: ${contactPhone || "Não informado"}
 - Veículo informado: ${vehicle || "Ainda não identificado"}
 
 🎯 REGRAS DE ATENDIMENTO (MÉTODO A.P.O.N.T.E.):
-${regrasHudson}
+${sanitizedRegras}
 `;
 };
 

@@ -59,5 +59,18 @@ NOTA: Ab2 Qu2 Re— = 4/16
     expect(bastidores?.atencao).toBe("Cliente pediu 3 pneus; importante confirmar estado do 4º pneu na loja por segurança.");
     expect(bastidores?.nota).toBe("Ab2 Qu2 Re— = 4/16");
   });
+
+  it("deve remover chamadas de ferramentas alucinadas como SUPRESSED_TOOL_CALL ou blocos JSON de ferramentas", () => {
+    const rawWithToolCall = `[[SUPRESSED_TOOL_CALL: buscar_produtos(medida_pneu="185/65 R14")]] 🎉 Ana, o Sienna 2016 usa a medida *185/65 R14*!`;
+    const res1 = parseAiOutput(rawWithToolCall);
+    expect(res1.cleanContent).toBe("🎉 Ana, o Sienna 2016 usa a medida *185/65 R14*!");
+    expect(res1.cleanContent).not.toContain("SUPRESSED_TOOL_CALL");
+    expect(res1.cleanContent).not.toContain("buscar_produtos");
+
+    const rawWithJson = "```json\n[\n  \"buscar_produtos\"\n]\n```\nOlá Ana, temos o pneu 185/65 R14 disponível.";
+    const res2 = parseAiOutput(rawWithJson);
+    expect(res2.cleanContent).toBe("Olá Ana, temos o pneu 185/65 R14 disponível.");
+    expect(res2.cleanContent).not.toContain("```json");
+  });
 });
 
