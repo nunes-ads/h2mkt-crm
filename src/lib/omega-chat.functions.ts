@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireLegacyIntegrationAdmin } from "./crm/legacy-access";
 import { aiSuggestionInput } from "./crm/ai-policy";
@@ -97,16 +98,61 @@ ${regrasHudson}
 `;
 };
 
+// Server function para verificação de status da chave de IA
+export const getAiKeyStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireLegacyIntegrationAdmin(context.supabase, context.userId);
+    const hasKey = Boolean(process.env['LOVABLE_API_KEY'] || process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY']);
+    const provider = process.env['LOVABLE_API_KEY'] ? 'lovable' : (process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY']) ? 'gemini' : null;
+    return { configured: hasKey, provider };
+  });
+
+// Server function para salvar a chave de IA localmente no .env e na memória do servidor
+export const saveAiApiKey = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(z.object({ apiKey: z.string().trim().min(5).max(300) }))
+  .handler(async ({ data, context }) => {
+    await requireLegacyIntegrationAdmin(context.supabase, context.userId);
+    const trimmed = data.apiKey.trim();
+    if (trimmed.startsWith('AIza')) {
+      process.env['GEMINI_API_KEY'] = trimmed;
+    } else {
+      process.env['LOVABLE_API_KEY'] = trimmed;
+    }
+    try {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const envPath = path.resolve(process.cwd(), '.env');
+      if (fs.existsSync(envPath)) {
+        let content = fs.readFileSync(envPath, 'utf8');
+        const varName = trimmed.startsWith('AIza') ? 'GEMINI_API_KEY' : 'LOVABLE_API_KEY';
+        if (content.includes(`${varName}=`)) {
+          content = content.replace(new RegExp(`${varName}=.*`), `${varName}="${trimmed}"`);
+        } else {
+          content += `\n${varName}="${trimmed}"\n`;
+        }
+        fs.writeFileSync(envPath, content, 'utf8');
+      }
+    } catch (err) {
+      console.warn('Não foi possível persistir no .env local:', err);
+    }
+    return { success: true, provider: trimmed.startsWith('AIza') ? 'gemini' : 'lovable' };
+  });
+
 // Server function para geração de resposta inteligente
 export const generateAiChatbotResponse = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(aiSuggestionInput)
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const key = process.env['LOVABLE_API_KEY'] || process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'];
-    if (!key) throw new Error('IA não configurada. Configure LOVABLE_API_KEY ou GEMINI_API_KEY no arquivo .env.');
+    const key = data.apiKey?.trim() || process.env['LOVABLE_API_KEY'] || process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'];
+    if (!key) throw new Error('IA não configurada. Configure sua chave do Google Gemini ou Lovable API Key.');
 
-    const isGeminiDirect = Boolean(!process.env['LOVABLE_API_KEY'] && (process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY']));
+    const isGeminiDirect = Boolean(
+      (data.apiKey && !process.env['LOVABLE_API_KEY']) ||
+      (!process.env['LOVABLE_API_KEY'] && (process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY']))
+    );
     const endpoint = isGeminiDirect
       ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
       : 'https://ai.gateway.lovable.dev/v1/chat/completions';
@@ -125,7 +171,7 @@ export const generateAiChatbotResponse = createServerFn({ method: "POST" })
     if (!response.ok) {
       const errText = await response.text().catch(() => '');
       console.error('[IA Chatbot] Erro da API:', response.status, errText);
-      throw new Error('IA indisponível. Continue o atendimento humano e tente novamente depois.');
+      throw new Error(`IA indisponível (${response.status}). Verifique sua chave de API e tente novamente.`);
     }
     const result = await response.json();
     const rawReply = result.choices?.[0]?.message?.content;

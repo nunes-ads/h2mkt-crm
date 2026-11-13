@@ -16,6 +16,7 @@ export const aiSuggestionInput = z
     contactPhone: z.string().max(40).optional(),
     carro: z.string().max(200).optional(),
     etapa: z.string().max(100).optional(),
+    apiKey: z.string().max(300).optional(),
   })
   .strict()
   .refine(

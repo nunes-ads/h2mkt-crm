@@ -34,7 +34,7 @@ import {
   type Filtro,
   type Mensagem,
 } from "./dados";
-import { generateAiChatbotResponse, parseAiOutput, parseSuggestions } from "@/lib/omega-chat.functions";
+import { generateAiChatbotResponse, parseAiOutput, parseSuggestions, getAiKeyStatus, saveAiApiKey } from "@/lib/omega-chat.functions";
 import {
   AlertTriangle,
   Archive,
@@ -409,6 +409,27 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
   const sendEvoReaction = useServerFn(sendEvolutionReaction);
   const markEvoRead = useServerFn(markEvolutionChatAsRead);
   const callGenerateAi = useServerFn(generateAiChatbotResponse);
+  const fetchAiKeyStatus = useServerFn(getAiKeyStatus);
+  const fetchSaveAiApiKey = useServerFn(saveAiApiKey);
+
+  const [modalAiKeyAberto, setModalAiKeyAberto] = useState(false);
+  const [aiKeyInput, setAiKeyInput] = useState("");
+  const [salvandoKey, setSalvandoKey] = useState(false);
+  const [customAiKey, setCustomAiKey] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("omega_ai_custom_key") || "";
+  });
+  const [serverAiKeyConfigured, setServerAiKeyConfigured] = useState(false);
+
+  useEffect(() => {
+    fetchAiKeyStatus()
+      .then((res) => {
+        if (res?.configured) setServerAiKeyConfigured(true);
+      })
+      .catch(() => null);
+  }, [fetchAiKeyStatus]);
+
+  const temChaveIa = Boolean(customAiKey || serverAiKeyConfigured);
 
   // Autonomous delivery requires a durable, tenant-scoped workflow (not browser flags).
   const iaGlobalAtiva = false;
@@ -535,6 +556,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
             contactPhone: chatTel,
             carro: carro || "",
             etapa: etapa || "Abordagem",
+            apiKey: customAiKey || undefined,
           },
         });
 
@@ -614,6 +636,20 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
       const remoteJid = targetId || sel?.id;
       if (!remoteJid) return;
 
+      const chatAlvo = lista.find((c) => c.id === remoteJid || c.aliases?.includes(remoteJid));
+      const vaiAtivar = !chatAlvo?.iaAtiva;
+
+      if (vaiAtivar && !temChaveIa) {
+        setAiKeyInput(customAiKey);
+        setModalAiKeyAberto(true);
+        dispararPopup(
+          "Configurar IA Hudson",
+          "Insira sua chave do Google Gemini para ativar o Hudson.",
+          remoteJid
+        );
+        return;
+      }
+
       setLista((prev) => {
         const chat = prev.find((c) => c.id === remoteJid || c.aliases?.includes(remoteJid));
         const novoEstado = !chat?.iaAtiva;
@@ -659,12 +695,18 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
         );
       });
     },
-    [sel?.id, setLista, dispararPopup, responderComIa]
+    [sel?.id, lista, temChaveIa, customAiKey, setLista, dispararPopup, responderComIa]
   );
 
   // Sugerir resposta com IA manualmente para o atendente
   const sugerirRespostaIa = useCallback(async () => {
     if (!sel || gerandoIa) return;
+    if (!temChaveIa) {
+      setAiKeyInput(customAiKey);
+      setModalAiKeyAberto(true);
+      dispararPopup("Configurar IA Hudson", "Insira sua chave do Google Gemini para usar sugestões.");
+      return;
+    }
     setGerandoIa(true);
     try {
       const apiMessages = sel.msgs
@@ -682,6 +724,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
           contactPhone: sel.tel,
           carro: sel.carro,
           etapa: sel.etapa,
+          apiKey: customAiKey || undefined,
         },
       });
 
@@ -701,7 +744,30 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
     } finally {
       setGerandoIa(false);
     }
-  }, [sel, gerandoIa, callGenerateAi, atualizarConversa, dispararPopup]);
+  }, [sel, gerandoIa, temChaveIa, customAiKey, callGenerateAi, atualizarConversa, dispararPopup]);
+
+  const salvarChaveIa = useCallback(async (chave: string) => {
+    const limpa = chave.trim();
+    if (!limpa) return;
+    setSalvandoKey(true);
+    try {
+      await fetchSaveAiApiKey({ data: { apiKey: limpa } });
+      try {
+        localStorage.setItem("omega_ai_custom_key", limpa);
+      } catch {}
+      setCustomAiKey(limpa);
+      setServerAiKeyConfigured(true);
+      setModalAiKeyAberto(false);
+      dispararPopup("IA Hudson", "Chave de IA configurada com sucesso! Você já pode ativar o Hudson.");
+      if (sel) {
+        setTimeout(() => alternarIaConversa(sel.id), 250);
+      }
+    } catch (err) {
+      dispararPopup("Erro ao salvar chave", err instanceof Error ? err.message : "Tente novamente.");
+    } finally {
+      setSalvandoKey(false);
+    }
+  }, [fetchSaveAiApiKey, dispararPopup, sel, alternarIaConversa]);
 
   // Sincroniza conversas da Evolution API para a instância da conta ativa
   const sincronizarChats = useCallback(async (selecionarPrimeiro = false, silencioso = false) => {
@@ -2897,6 +2963,21 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
                     </button>
                   </div>
 
+                  {/* Status e Configuração da Chave de IA */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 2px", marginTop: -6 }}>
+                    <span style={{ fontSize: 10, color: temChaveIa ? "#22c55e" : "#eab308", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: temChaveIa ? "#22c55e" : "#eab308" }} />
+                      {temChaveIa ? "Chave de IA configurada" : "Chave de IA pendente"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setAiKeyInput(customAiKey); setModalAiKeyAberto(true); }}
+                      style={{ background: "none", border: "none", color: temChaveIa ? "var(--fg-3)" : "#eab308", fontSize: 10, cursor: "pointer", textDecoration: "underline", fontWeight: temChaveIa ? 400 : 700 }}
+                    >
+                      {temChaveIa ? "Alterar chave" : "Configurar agora"}
+                    </button>
+                  </div>
+
                   {/* 2. Ponto de Atenção da IA (se houver) */}
                   {sel.bastidores?.atencao && (
                     <div className="wa-bastidores-alert">
@@ -4176,6 +4257,59 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
                   }}
                 >
                   Confirmar Perda
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 12. MODAL DE CONFIGURAÇÃO DA CHAVE DE IA HUDSON */}
+      {modalAiKeyAberto && (
+        <div className="wa-modal-backdrop" onClick={() => setModalAiKeyAberto(false)}>
+          <div className="wa-modal-card" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="wa-modal-header">
+              <h2 style={{ fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+                <Bot size={20} color="#22c55e" /> Configurar IA Hudson
+              </h2>
+              <button type="button" className="wa-btn-icon" onClick={() => setModalAiKeyAberto(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ padding: "16px 20px" }}>
+              <p style={{ fontSize: 13, color: "var(--fg-2)", marginBottom: 14, lineHeight: 1.5 }}>
+                Para a IA Hudson responder automaticamente seus clientes no WhatsApp e sugerir orçamentos conforme as regras comerciais do Grupo Ômega, insira sua chave do <strong>Google Gemini</strong> (gratuita) ou <strong>Lovable API Key</strong>:
+              </p>
+
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "var(--fg-2)", marginBottom: 6 }}>
+                Chave da API (Gemini ou Lovable) *
+              </label>
+              <input
+                type="text"
+                className="input"
+                style={{ width: "100%", padding: "9px 12px", fontSize: 13, fontFamily: "monospace", borderRadius: 6, marginBottom: 10 }}
+                placeholder="Cole aqui: AIzaSy... ou lovable_..."
+                value={aiKeyInput}
+                onChange={(e) => setAiKeyInput(e.target.value)}
+              />
+
+              <div style={{ fontSize: 11.5, color: "var(--fg-3)", backgroundColor: "var(--inset)", padding: "10px 12px", borderRadius: 6, marginBottom: 16, lineHeight: 1.4 }}>
+                💡 <strong>Como obter uma chave gratuita:</strong>
+                <br />
+                Acesse o <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{ color: "#22c55e", textDecoration: "underline" }}>Google AI Studio</a>, faça login com sua conta Google e clique em <em>Create API key</em>. O modelo Gemini 1.5 Flash possui plano gratuito para atendimento.
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setModalAiKeyAberto(false)}>
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  disabled={!aiKeyInput.trim() || salvandoKey}
+                  onClick={() => void salvarChaveIa(aiKeyInput)}
+                >
+                  {salvandoKey ? "Salvando…" : "Salvar e Ativar IA"}
                 </button>
               </div>
             </div>

@@ -55,6 +55,8 @@ vi.mock("@/lib/evolution.functions", () => ({
 }));
 vi.mock("@/lib/omega-chat.functions", () => ({
   generateAiChatbotResponse: vi.fn(),
+  getAiKeyStatus: vi.fn().mockResolvedValue({ configured: true, provider: "gemini" }),
+  saveAiApiKey: vi.fn().mockResolvedValue({ success: true }),
   parseAiOutput: (text: string) => ({ cleanContent: text }),
   parseSuggestions: vi.fn(),
 }));
