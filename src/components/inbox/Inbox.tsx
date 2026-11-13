@@ -807,7 +807,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
           ficha: [],
           ag: null,
           log: [{ t: hhmm(), text: `sincronizado com Evolution (${instanceName})` }],
-          iaAtiva: false,
+          iaAtiva: iaChatsAtivos.includes(c.remoteJid) || Boolean(c.aliases?.some((a: string) => iaChatsAtivos.includes(a))),
         }));
 
         setLista((prev) => {
@@ -857,7 +857,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
                 notas: existente.notas,
                 lembrete: existente.lembrete,
                 msgs: existingHistory.length ? existingHistory : novo.msgs,
-                iaAtiva: false,
+                iaAtiva: Boolean(existente.iaAtiva || iaChatsAtivos.includes(existente.id) || iaChatsAtivos.includes(novo.id) || existente.aliases?.some(a => iaChatsAtivos.includes(a))),
               };
             }
             return novo;

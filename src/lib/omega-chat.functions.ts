@@ -115,7 +115,8 @@ export const saveAiApiKey = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
     const trimmed = data.apiKey.trim();
-    if (trimmed.startsWith('AIza')) {
+    const isGemini = trimmed.startsWith('AIza') || trimmed.startsWith('AQ.') || !trimmed.startsWith('lovable_');
+    if (isGemini) {
       process.env['GEMINI_API_KEY'] = trimmed;
     } else {
       process.env['LOVABLE_API_KEY'] = trimmed;
@@ -126,7 +127,7 @@ export const saveAiApiKey = createServerFn({ method: "POST" })
       const envPath = path.resolve(process.cwd(), '.env');
       if (fs.existsSync(envPath)) {
         let content = fs.readFileSync(envPath, 'utf8');
-        const varName = trimmed.startsWith('AIza') ? 'GEMINI_API_KEY' : 'LOVABLE_API_KEY';
+        const varName = isGemini ? 'GEMINI_API_KEY' : 'LOVABLE_API_KEY';
         if (content.includes(`${varName}=`)) {
           content = content.replace(new RegExp(`${varName}=.*`), `${varName}="${trimmed}"`);
         } else {
@@ -137,7 +138,7 @@ export const saveAiApiKey = createServerFn({ method: "POST" })
     } catch (err) {
       console.warn('Não foi possível persistir no .env local:', err);
     }
-    return { success: true, provider: trimmed.startsWith('AIza') ? 'gemini' : 'lovable' };
+    return { success: true, provider: isGemini ? 'gemini' : 'lovable' };
   });
 
 // Server function para geração de resposta inteligente
@@ -146,17 +147,21 @@ export const generateAiChatbotResponse = createServerFn({ method: "POST" })
   .validator(aiSuggestionInput)
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const key = data.apiKey?.trim() || process.env['LOVABLE_API_KEY'] || process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY'];
+    const key = data.apiKey?.trim() || process.env['GEMINI_API_KEY'] || process.env['LOVABLE_API_KEY'] || process.env['GOOGLE_API_KEY'];
     if (!key) throw new Error('IA não configurada. Configure sua chave do Google Gemini ou Lovable API Key.');
 
     const isGeminiDirect = Boolean(
-      (data.apiKey && !process.env['LOVABLE_API_KEY']) ||
-      (!process.env['LOVABLE_API_KEY'] && (process.env['GEMINI_API_KEY'] || process.env['GOOGLE_API_KEY']))
+      (data.apiKey && !data.apiKey.startsWith('lovable_')) ||
+      process.env['GEMINI_API_KEY'] ||
+      process.env['GOOGLE_API_KEY'] ||
+      key.startsWith('AQ.') ||
+      key.startsWith('AIza') ||
+      !key.startsWith('lovable_')
     );
     const endpoint = isGeminiDirect
       ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
       : 'https://ai.gateway.lovable.dev/v1/chat/completions';
-    const defaultModel = isGeminiDirect ? 'gemini-1.5-flash' : 'google/gemini-3-flash-preview';
+    const defaultModel = isGeminiDirect ? 'gemini-3.5-flash-lite' : 'google/gemini-3-flash-preview';
     const model = process.env['LOVABLE_AI_MODEL'] || defaultModel;
 
     const response = await fetch(endpoint, {
