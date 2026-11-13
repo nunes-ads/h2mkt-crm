@@ -6,6 +6,7 @@ import { CrmContacts } from "@/components/crm/CrmContacts";
 const api = vi.hoisted(() => ({
   getCrmWorkspace: vi.fn(),
   listCrmContacts: vi.fn(),
+  listCrmWhatsAppLeads: vi.fn(),
   saveCrmContact: vi.fn(),
   importCrmContacts: vi.fn(),
   mergeCrmContacts: vi.fn(),
@@ -72,6 +73,15 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Cadastro operacional", () => {
+  it("consulta a base de leads do WhatsApp apenas na organização selecionada", async () => {
+    api.listCrmWhatsAppLeads.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 25, fields: [] });
+    mount();
+    fireEvent.change(await screen.findByLabelText("Base de contatos ou leads"), { target: { value: "whatsapp" } });
+    await waitFor(() => expect(api.listCrmWhatsAppLeads).toHaveBeenCalledWith({
+      data: { tenant_id: tenant, query: "", status: "active", page: 1, page_size: 25 },
+    }));
+  });
+
   it("base ausente não vira sucesso, dados demo ou botão de criação", async () => {
     api.getCrmWorkspace.mockResolvedValue({ state: "setup", memberships: [], message: "" });
     mount();

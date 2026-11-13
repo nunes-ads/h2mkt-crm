@@ -430,6 +430,17 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
   const [painelBastidoresAberto, setPainelBastidoresAberto] = useState(true);
 
   // Controle de mensagens processadas para resposta automática
+  const isReplyingAiRef = useRef<Set<string>>(new Set());
+  const processedAiMessagesRef = useRef<Set<string>>(new Set());
+  const [iaChatsAtivos, setIaChatsAtivos] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = localStorage.getItem("omega_ia_active_chats");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Modo de composição: mensagem para o WhatsApp ou nota interna privada (RN-044)
   const [modoComposicao, setModoComposicao] = useState<"mensagem" | "nota">("mensagem");
@@ -492,9 +503,164 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
     textareaRef.current.style.overflowY = scrollHeight > maxHeight ? "auto" : "hidden";
   }, [draft]);
 
-  const alternarIaConversa = useCallback(() => {
-    dispararPopup('IA em revisão humana', 'Use Sugerir resposta para revisar uma mensagem antes de enviar.');
-  }, [dispararPopup]);
+  // Executa a resposta inteligente da IA para o WhatsApp
+  const responderComIa = useCallback(
+    async (
+      remoteJid: string,
+      chatNome: string,
+      chatTel: string,
+      historicoMsgs: Array<{ fromMe: boolean; text: string; id: string }>,
+      carro?: string,
+      etapa?: string
+    ) => {
+      if (isReplyingAiRef.current.has(remoteJid)) return;
+      isReplyingAiRef.current.add(remoteJid);
+      setGerandoIa(true);
+
+      try {
+        const apiMessages = historicoMsgs
+          .slice(-15)
+          .map((m) => ({
+            role: m.fromMe ? ("assistant" as const) : ("user" as const),
+            content: m.text || "",
+          }))
+          .filter((m) => m.content.trim().length > 0);
+
+        if (apiMessages.length === 0) return;
+
+        const res = await callGenerateAi({
+          data: {
+            messages: apiMessages,
+            contactName: chatNome,
+            contactPhone: chatTel,
+            carro: carro || "",
+            etapa: etapa || "Abordagem",
+          },
+        });
+
+        if (res && res.replyText) {
+          const { cleanContent, suggestions, bastidores } = parseAiOutput(res.rawReply || res.replyText);
+          const textoParaEnviar = cleanContent || res.replyText;
+
+          // Envia resposta via Evolution API para o WhatsApp (APENAS o texto limpo, NUNCA os bastidores!)
+          await sendEvoMsg({
+            data: {
+              number: remoteJid,
+              text: textoParaEnviar,
+              accountId: activeAccount.id,
+              expectedInstance: instanceName,
+            },
+          }).catch((err) => console.warn("Aviso ao enviar via Evolution API:", err));
+
+          const novaMsg: Mensagem = {
+            id: crypto.randomUUID(),
+            kind: "vendedor",
+            text: textoParaEnviar,
+            t: hhmm(),
+            nome: "Hudson (IA)",
+          };
+
+          setLista((prev) =>
+            prev.map((c) => {
+              if (c.id !== remoteJid && !c.aliases?.includes(remoteJid)) return c;
+
+              let novaEtapa = c.etapa;
+              if (bastidores?.etapa) {
+                const e = bastidores.etapa.toLowerCase();
+                if (e.includes("pesquisa") || e.includes("descoberta") || e.startsWith("p")) novaEtapa = "Descoberta da necessidade";
+                else if (e.includes("orçamento") || e.includes("proposta") || e.startsWith("o")) novaEtapa = "Proposta";
+                else if (e.includes("negociação") || e.startsWith("n")) novaEtapa = "Negociação";
+                else if (e.includes("agend") || e.startsWith("t") || e.startsWith("e")) novaEtapa = "Agendamento";
+                else if (e.includes("abordagem") || e.startsWith("a")) novaEtapa = "Abordagem";
+              }
+
+              const novasTags = new Set(c.tags || []);
+              if (bastidores?.etiqueta) novasTags.add(bastidores.etiqueta);
+
+              return {
+                ...c,
+                msgs: [...c.msgs, novaMsg],
+                etapa: novaEtapa,
+                tags: Array.from(novasTags),
+                bastidores: bastidores || c.bastidores,
+                esperaMin: null,
+                data: "Hoje",
+                log: [{ t: hhmm(), text: `Hudson respondeu automaticamente (${res.model})` }, ...c.log],
+              };
+            })
+          );
+
+          if (suggestions && suggestions.length > 0) {
+            setChatSuggestions(suggestions);
+          }
+
+          dispararPopup("IA Hudson", `Hudson respondeu automaticamente para ${chatNome}`, remoteJid);
+          if (prefs.sound) playWebAudioBeep(prefs.volume);
+          setTimeout(() => scrollToBottom(true, true), 100);
+        }
+      } catch (err) {
+        console.error("Erro ao gerar resposta automática da IA:", err);
+      } finally {
+        isReplyingAiRef.current.delete(remoteJid);
+        setGerandoIa(false);
+      }
+    },
+    [callGenerateAi, sendEvoMsg, activeAccount.id, instanceName, setLista, dispararPopup, prefs.sound, prefs.volume, scrollToBottom]
+  );
+
+  // Alterna o status da IA para uma conversa específica
+  const alternarIaConversa = useCallback(
+    (targetId?: string) => {
+      const remoteJid = targetId || sel?.id;
+      if (!remoteJid) return;
+
+      setLista((prev) => {
+        const chat = prev.find((c) => c.id === remoteJid || c.aliases?.includes(remoteJid));
+        const novoEstado = !chat?.iaAtiva;
+
+        setIaChatsAtivos((old) => {
+          const set = new Set(old);
+          if (novoEstado) set.add(remoteJid);
+          else set.delete(remoteJid);
+          const arr = Array.from(set);
+          try {
+            localStorage.setItem("omega_ia_active_chats", JSON.stringify(arr));
+          } catch {}
+          return arr;
+        });
+
+        dispararPopup(
+          "IA Hudson",
+          novoEstado
+            ? `🤖 IA ativada para ${chat?.nome || remoteJid}`
+            : `🤖 IA desativada para ${chat?.nome || remoteJid}`,
+          remoteJid
+        );
+
+        if (novoEstado && chat && chat.msgs.length > 0) {
+          const ult = chat.msgs[chat.msgs.length - 1];
+          if (ult && ult.kind === "cliente" && !processedAiMessagesRef.current.has(ult.id)) {
+            processedAiMessagesRef.current.add(ult.id);
+            setTimeout(() => {
+              void responderComIa(
+                remoteJid,
+                chat.nome || "Cliente",
+                chat.tel || "",
+                chat.msgs.map((m) => ({ fromMe: m.kind === "vendedor", text: m.text, id: m.id })),
+                chat.carro,
+                chat.etapa
+              );
+            }, 300);
+          }
+        }
+
+        return prev.map((c) =>
+          c.id === remoteJid || c.aliases?.includes(remoteJid) ? { ...c, iaAtiva: novoEstado } : c
+        );
+      });
+    },
+    [sel?.id, setLista, dispararPopup, responderComIa]
+  );
 
   // Sugerir resposta com IA manualmente para o atendente
   const sugerirRespostaIa = useCallback(async () => {
@@ -681,6 +847,24 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
         const aliasesChanged = nextAliases.length !== (chat.aliases?.length ?? 0);
         if (msgs === chat.msgs && tel === chat.tel && !aliasesChanged) return prev;
         if (silencioso && msgs.length > chat.msgs.length && prefs.sound) playWebAudioBeep(prefs.volume);
+
+        // Se a IA desta conversa estiver ATIVA (no chat ou nos ativos salvos)
+        const ultimo = msgs[msgs.length - 1];
+        const iaAtiva = Boolean(chat.iaAtiva || iaChatsAtivos.includes(remoteJid) || iaChatsAtivos.includes(chat.id));
+        if (iaAtiva && ultimo && ultimo.kind === 'cliente' && !processedAiMessagesRef.current.has(ultimo.id)) {
+          processedAiMessagesRef.current.add(ultimo.id);
+          setTimeout(() => {
+            void responderComIa(
+              remoteJid,
+              chat.nome || "Cliente",
+              chat.tel || "",
+              msgs.map((m) => ({ fromMe: m.kind === "vendedor", text: m.text, id: m.id })),
+              chat.carro,
+              chat.etapa
+            );
+          }, 300);
+        }
+
         return prev.map(c => c === chat ? { ...c, msgs, tel, aliases: aliasesChanged ? nextAliases : c.aliases } : c);
       });
     } catch (err) {
@@ -695,7 +879,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
         setTimeout(() => scrollToBottom(false, true), 40);
       }
     }
-  }, [fetchEvoMessages, setLista, prefs.sound, prefs.volume, activeAccount.id, instanceName, scrollToBottom, carregarStatus, dispararPopup]);
+  }, [fetchEvoMessages, setLista, prefs.sound, prefs.volume, activeAccount.id, instanceName, scrollToBottom, carregarStatus, dispararPopup, iaChatsAtivos, responderComIa]);
 
   useEffect(() => {
     activeRef.current = true;
@@ -1731,7 +1915,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
                 {/* BOTÃO LIGAR/DESLIGAR IA NESTA CONVERSA */}
                 <button
                   type="button"
-                  onClick={() => alternarIaConversa()}
+                  onClick={() => alternarIaConversa(sel.id)}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -2697,7 +2881,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
                     </div>
                     <button
                       type="button"
-                      onClick={() => alternarIaConversa()}
+                      onClick={() => alternarIaConversa(sel.id)}
                       style={{
                         backgroundColor: sel.iaAtiva ? "#22c55e" : "var(--bg-3, #e2e8e4)",
                         color: sel.iaAtiva ? "#ffffff" : "var(--fg-1)",
@@ -3045,7 +3229,7 @@ function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }:
           <button
             type="button"
             onClick={() => {
-              alternarIaConversa();
+              alternarIaConversa(contextMenu.conversa.id);
               setContextMenu(null);
             }}
           >

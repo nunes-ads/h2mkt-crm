@@ -22,6 +22,7 @@ import {
 import {
   getCrmWorkspace,
   listCrmContacts,
+  listCrmWhatsAppLeads,
   saveCrmContact,
   importCrmContacts,
   mergeCrmContacts,
@@ -128,6 +129,7 @@ export function CrmContacts({ userId }: { userId: string }) {
 function ContactDirectory({ member }: { member: Membership }) {
   const queryClient = useQueryClient();
   const list = useServerFn(listCrmContacts);
+  const listWhatsAppLeads = useServerFn(listCrmWhatsAppLeads);
   const save = useServerFn(saveCrmContact);
   const merge = useServerFn(mergeCrmContacts);
   const archive = useServerFn(archiveCrmContact);
@@ -137,6 +139,7 @@ function ContactDirectory({ member }: { member: Membership }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"active" | "archived">("active");
+  const [directory, setDirectory] = useState<"contacts" | "whatsapp">("contacts");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Contact[]>([]);
   const [editor, setEditor] = useState<Contact | "new" | null>(null);
@@ -154,9 +157,10 @@ function ContactDirectory({ member }: { member: Membership }) {
   const rootKey = ["crm", member.user_id, member.tenant_id, "contacts"];
   const input = { tenant_id: member.tenant_id, query, status, page, page_size: 25 };
   const result = useQuery({
-    queryKey: [...rootKey, input],
-    queryFn: () => list({ data: input }),
+    queryKey: [...rootKey, directory, input],
+    queryFn: () => directory === "whatsapp" ? listWhatsAppLeads({ data: input }) : list({ data: input }),
     retry: false,
+    refetchInterval: directory === "whatsapp" ? 15000 : false,
   });
   const fields = result.data?.fields ?? [];
   const rows = result.data?.items ?? [];
@@ -267,6 +271,19 @@ function ContactDirectory({ member }: { member: Membership }) {
           <PwButton type="submit">Buscar</PwButton>
         </form>
         <select
+          aria-label="Base de contatos ou leads"
+          className="input select"
+          value={directory}
+          onChange={(e) => {
+            setDirectory(e.target.value === "whatsapp" ? "whatsapp" : "contacts");
+            setPage(1);
+            setSelected([]);
+          }}
+        >
+          <option value="contacts">Todos os contatos</option>
+          <option value="whatsapp">Leads do WhatsApp</option>
+        </select>
+        <select
           aria-label="Situação dos contatos"
           className="input select"
           value={status}
@@ -296,7 +313,7 @@ function ContactDirectory({ member }: { member: Membership }) {
             Importar CSV / Excel
           </PwButton>
         )}
-        {canAccess(member, "contacts.export") && (
+        {directory === "contacts" && canAccess(member, "contacts.export") && (
           <PwButton
             disabled={busy || !rows.length || result.isFetching}
             onClick={() => void download()}
@@ -334,7 +351,9 @@ function ContactDirectory({ member }: { member: Membership }) {
         <>
           <div className="card pw-table-wrap">
             <table className="table">
-              <caption className="sr-only">Contatos de {member.name}</caption>
+              <caption className="sr-only">
+                {directory === "whatsapp" ? "Leads do WhatsApp" : "Contatos"} de {member.name}
+              </caption>
               <thead>
                 <tr>
                   <th>Selecionar</th>

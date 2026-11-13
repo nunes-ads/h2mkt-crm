@@ -19,6 +19,7 @@ import {
   historySchema,
 } from "./contracts";
 import { normalizePhone, normalizeEmail } from "./contacts";
+import { compareLeadPeriods, leadDailyInput, leadDailySchema } from "./lead-period";
 
 // Isolated adapter until Lovable regenerates the schema types. Responses are runtime validated.
 const client = (value: unknown) => value as RpcClient;
@@ -61,6 +62,21 @@ export const listCrmContacts = createServerFn({ method: "POST" })
   .handler(({ context, data }) =>
     verifiedCrmRpc(context.supabase, context.userId, "contacts.list", data, pageSchema),
   );
+export const listCrmWhatsAppLeads = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(listInput)
+  .handler(({ context, data }) =>
+    verifiedCrmRpc(context.supabase, context.userId, "leads.whatsapp.list", data, pageSchema),
+  );
+export const getCrmWhatsAppLeadDaily = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator(leadDailyInput)
+  .handler(async ({ context, data }) => {
+    const result = await verifiedCrmRpc(
+      context.supabase, context.userId, "leads.whatsapp.daily", data, leadDailySchema,
+    );
+    return compareLeadPeriods(data, result);
+  });
 export const saveCrmContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(saveInput)

@@ -38,35 +38,35 @@ import { useActiveAccount } from "@/lib/omega-accounts";
 const grupos = [
   { nome: "Visão geral", itens: [
     { to: "/painel", label: "Painel", icon: LayoutGrid },
-    { to: "/funil", label: "Funil", icon: Filter, count: 23 },
-    { to: "/agenda", label: "Agenda", icon: CalendarDays, count: 5 },
+    { to: "/funil", label: "Funil", icon: Filter },
+    { to: "/agenda", label: "Agenda", icon: CalendarDays },
   ] },
   { nome: "Atendimento", itens: [
-    { to: "/", label: "Inbox", icon: MessageCircle, count: 19 },
-    { to: "/ligacoes", label: "Ligações", icon: PhoneCall, count: 4 },
-    { to: "/followup", label: "Follow-up", icon: History, count: 9 },
+    { to: "/", label: "Inbox", icon: MessageCircle },
+    { to: "/ligacoes", label: "Ligações", icon: PhoneCall },
+    { to: "/followup", label: "Follow-up", icon: History },
     { to: "/campanhas", label: "Campanhas", icon: Megaphone },
-    { to: "/canais", label: "Canais", icon: Plug, count: 3 },
+    { to: "/canais", label: "Canais", icon: Plug },
   ] },
   { nome: "Vendas", itens: [
-    { to: "/orcamentos", label: "Orçamentos", icon: FileText, count: 8 },
-    { to: "/estoque", label: "Estoque", icon: Boxes, count: 3551 },
+    { to: "/orcamentos", label: "Orçamentos", icon: FileText },
+    { to: "/estoque", label: "Estoque", icon: Boxes },
     { to: "/contatos", label: "Contatos", icon: Users },
-    { to: "/lojas", label: "Lojas", icon: Store, count: 18 },
+    { to: "/lojas", label: "Lojas", icon: Store },
   ] },
   { nome: "Automação", itens: [
-    { to: "/recrutamento", label: "Recrutamento de loja", icon: RefreshCw, count: 9 },
+    { to: "/recrutamento", label: "Recrutamento de loja", icon: RefreshCw },
   ] },
   { nome: "Equipe", itens: [
-    { to: "/filas", label: "Filas de atendimento", icon: Users, count: 3 },
-    { to: "/usuarios", label: "Usuários", icon: UserPlus, count: 5 },
+    { to: "/filas", label: "Filas de atendimento", icon: Users },
+    { to: "/usuarios", label: "Usuários", icon: UserPlus },
     { to: "/ranking", label: "Ranking de equipe", icon: Trophy },
   ] },
   { nome: "Agentes", itens: [
-    { to: "/agentes", label: "Agentes IA", icon: Bot, count: 1 },
+    { to: "/agentes", label: "Agentes IA", icon: Bot },
   ] },
   { nome: "Plataforma", itens: [
-    { to: "/subcontas", label: "Subcontas", icon: Users, count: 1 },
+    { to: "/subcontas", label: "Subcontas", icon: Users },
     { to: "/mapa", label: "Mapa de conexões", icon: Network },
   ] },
   { nome: "Configurações", itens: [
@@ -96,7 +96,6 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
               >
                 <Icon aria-hidden="true" />
                 {it.label}
-                {"count" in it && <span className="count">{it.count}</span>}
               </Link>
             );
           })}

@@ -27,7 +27,7 @@ const options = {
         ]);
         if (!p.error && p.data) profile = p.data;
         if (!r.error && Array.isArray(r.data)) roles = r.data.map((x: { role: string }) => x.role);
-      } catch {}
+      } catch { }
       return {
         profile,
         roles,
