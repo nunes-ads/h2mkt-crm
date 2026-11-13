@@ -879,6 +879,31 @@
   justify-content: flex-end;
 }
 
+.wa-msg-row.has-reactions {
+  margin-bottom: 14px;
+}
+
+.wa-reaction-badge {
+  position: absolute;
+  bottom: -11px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel, #fff);
+  font-size: 13px;
+  line-height: 17px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+}
+
+.wa-msg-row.me .wa-reaction-badge {
+  left: auto;
+  right: 6px;
+}
+
 .wa-bubble {
   max-width: min(82%, 580px);
   padding: 8px 10px 5px 12px;

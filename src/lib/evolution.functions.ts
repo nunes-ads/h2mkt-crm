@@ -1,17 +1,86 @@
 import { createServerFn } from '@tanstack/react-start';
 import { requireSupabaseAuth } from '@/integrations/supabase/auth-middleware';
 import { z } from 'zod';
-import { requireLegacyIntegrationAdmin, resolveLegacyInstance } from './crm/legacy-access';
+import { requireLegacyIntegrationAdmin } from './crm/legacy-access';
+import { readWhatsAppReaction, whatsappAddressPair, whatsappHistoryJids, whatsappPhone, whatsappPhoneJid, type WhatsAppReaction } from './whatsapp-history';
+import { whatsappAccountId, type WhatsAppAccountId, type WhatsAppConnectionState } from './whatsapp-connection';
+import { resolveEvolutionInstance, readEvolutionState, requireEvolutionConnection, listEvolutionInstances, selectEvolutionInstance, needsFreshPairing, requireExpectedInstance } from './evolution-connection.server';
+import { whatsappDate, whatsappHour, whatsappTimestamp } from './whatsapp-time';
+import { whatsappContactProfile, whatsappName, whatsappPhoto, whatsappProfileKey, type WhatsAppProfile } from './whatsapp-profiles';
 
-function getEvolutionConfig(customInstance?: string) {
-  const url = process.env['EVOLUTION_API_URL'] || 'http://localhost:18080';
+type ProfileConfig = { url: string; key: string; instance: string };
+const contactsCache = new Map<string, { expires: number; value: Promise<Map<string, WhatsAppProfile>> }>();
+type PhotoEntry = { expires: number; url: string | null };
+const photoCaches = new Map<string, { entries: Map<string, PhotoEntry>; pending: Set<string> }>();
+
+function getContacts({ url, key, instance }: ProfileConfig) {
+  const scope = `${url}/${instance}`;
+  const cached = contactsCache.get(scope);
+  if (cached && cached.expires > Date.now()) return cached.value;
+  const value = fetch(`${url}/chat/findContacts/${instance}`, {
+    method: 'POST',
+    headers: { apikey: key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ where: {} }),
+    signal: AbortSignal.timeout(7000),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error('Contatos indisponíveis');
+    const data = await response.json();
+    const contacts = new Map<string, WhatsAppProfile>();
+    for (const c of Array.isArray(data) ? data : []) {
+      if (typeof c?.remoteJid === 'string') contacts.set(whatsappProfileKey(c.remoteJid), c);
+    }
+    return contacts;
+  }).catch(() => {
+    contactsCache.delete(scope);
+    return new Map<string, WhatsAppProfile>();
+  });
+  contactsCache.set(scope, { expires: Date.now() + 30000, value });
+  return value;
+}
+
+function cachedProfilePhoto({ url, key, instance }: ProfileConfig, jid: string, fallback: string | null) {
+  if (fallback) return fallback;
+  if (!/^[\d:-]+@(s\.whatsapp\.net|c\.us|lid|g\.us)$/.test(jid)) return null;
+  const scope = `${url}/${instance}`;
+  let cache = photoCaches.get(scope);
+  if (!cache) {
+    cache = { entries: new Map(), pending: new Set() };
+    photoCaches.set(scope, cache);
+  }
+  const { entries, pending } = cache;
+  const existing = entries.get(jid);
+  if (existing && existing.expires > Date.now()) return existing.url;
+  if (!pending.has(jid) && pending.size < 4) {
+    pending.add(jid);
+    void fetch(`${url}/chat/fetchProfilePictureUrl/${instance}`, {
+      method: 'POST',
+      headers: { apikey: key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ number: jid }),
+      signal: AbortSignal.timeout(6000),
+    }).then(response => response.ok ? response.json() : null).then(data => {
+      const photo = whatsappPhoto(data?.profilePictureUrl, data?.profilePicUrl, data?.pictureUrl);
+      if (entries.size >= 2000) {
+        const oldest = entries.keys().next().value;
+        if (oldest) entries.delete(oldest);
+      }
+      entries.set(jid, { url: photo, expires: Date.now() + (photo ? 30 : 5) * 60000 });
+    }).catch(() => {
+      entries.set(jid, { url: null, expires: Date.now() + 60000 });
+    }).finally(() => pending.delete(jid));
+  }
+  return existing?.url ?? null;
+}
+
+async function getEvolutionConfig(accountId: WhatsAppAccountId = 'matriz') {
+  const url = (process.env['EVOLUTION_API_URL'] || 'http://localhost:18080').replace(/\/+$/, '');
   const key = process.env['EVOLUTION_API_KEY'] || '';
-  const instance = resolveLegacyInstance(customInstance, process.env['EVOLUTION_INSTANCE_NAME']);
-  return { url: url.replace(/\/+$/, ''), key, instance };
+  const base = resolveEvolutionInstance(accountId, process.env);
+  const instances = await listEvolutionInstances({ url, key });
+  return { url, key, base, ...selectEvolutionInstance(base, instances) };
 }
 
 function extractMessageText(msg: any): string {
-  if (!msg) return '';
+  if (!msg || msg.reactionMessage) return '';
   if (typeof msg.conversation === 'string') return msg.conversation;
   if (typeof msg.extendedTextMessage?.text === 'string') return msg.extendedTextMessage.text;
   if (typeof msg.imageMessage?.caption === 'string') return `📷 ${msg.imageMessage.caption}`;
@@ -20,7 +89,6 @@ function extractMessageText(msg: any): string {
   if (msg.videoMessage) return '🎥 [Vídeo]';
   if (msg.documentMessage) return `📄 [Documento: ${msg.documentMessage.fileName || 'arquivo'}]`;
   if (msg.stickerMessage) return '🏷️ [Figurinha]';
-  if (msg.reactionMessage?.text) return `Reação: ${msg.reactionMessage.text}`;
   return 'Mensagem';
 }
 
@@ -47,7 +115,7 @@ function formatPhone(raw: string): string {
 
 export type EvolutionStatusResponse = {
   configured: boolean;
-  state: string;
+  state: WhatsAppConnectionState;
   instance: string;
   phone: string | null;
   profilePicUrl: string | null;
@@ -62,47 +130,21 @@ export type EvolutionStatusResponse = {
  */
 export const getEvolutionStatus = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
-  .validator(z.object({ instance: z.string().optional() }).optional())
+  .validator(z.object({ accountId: whatsappAccountId.optional() }).strict().optional())
   .handler(async ({ data, context }): Promise<EvolutionStatusResponse> => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data?.instance);
-    if (!key) {
-      return { configured: false, state: 'Chave não configurada', instance, phone: null, profilePicUrl: null, count: 0, contactsCount: 0, chatsCount: 0 };
-    }
-
-    try {
-      const res = await fetch(`${url}/instance/fetchInstances`, {
-        headers: { apikey: key },
-        signal: AbortSignal.timeout(6000),
-      });
-
-      if (!res.ok) {
-        return { configured: true, state: `Erro HTTP ${res.status}`, instance, phone: null, profilePicUrl: null, count: 0, contactsCount: 0, chatsCount: 0 };
-      }
-
-      const raw = await res.json();
-      const list = Array.isArray(raw) ? raw : raw.value || [];
-      const inst = list.find((i: any) => i.name === instance);
-
-      if (!inst) {
-        return { configured: true, state: 'Instância não criada', instance, phone: null, profilePicUrl: null, count: 0, contactsCount: 0, chatsCount: 0 };
-      }
-
-      const rawPhone = inst.ownerJid?.split('@')[0] || null;
-
-      return {
-        configured: true,
-        state: inst.connectionStatus || 'close',
-        instance: inst.name,
-        phone: rawPhone ? formatPhone(rawPhone) : null,
-        profilePicUrl: inst.profilePicUrl || null,
-        count: inst._count?.Message || 0,
-        contactsCount: inst._count?.Contact || 0,
-        chatsCount: inst._count?.Chat || 0,
-      };
-    } catch (err: any) {
-      return { configured: true, state: 'Inacessível', error: err.message, instance, phone: null, profilePicUrl: null, count: 0, contactsCount: 0, chatsCount: 0 };
-    }
+    const config = await getEvolutionConfig(data?.accountId);
+    const state = await readEvolutionState(config);
+    const metadata = state === 'open' ? config.metadata : undefined;
+    const phone = metadata?.ownerJid?.split('@')[0];
+    return {
+      configured: Boolean(config.key), state, instance: config.instance,
+      phone: phone ? formatPhone(phone) : null,
+      profilePicUrl: metadata?.profilePicUrl ?? null,
+      count: metadata?._count?.Message ?? 0,
+      contactsCount: metadata?._count?.Contact ?? 0,
+      chatsCount: metadata?._count?.Chat ?? 0,
+    };
   });
 
 export type EvolutionConnectResponse = {
@@ -121,99 +163,54 @@ export type EvolutionConnectResponse = {
  */
 export const getEvolutionConnectQr = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
-  .validator(z.object({
-    instance: z.string().optional(),
-    forceNew: z.boolean().optional(),
-  }).optional())
+  .validator(z.object({ accountId: whatsappAccountId.optional() }).strict().optional())
   .handler(async ({ data, context }): Promise<EvolutionConnectResponse> => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data?.instance);
-    if (!key) {
-      return { state: 'close', instance, error: 'Chave da Evolution API não configurada' };
+    const config = await getEvolutionConfig(data?.accountId);
+    const { url, key, instance: current } = config;
+    const state = await readEvolutionState(config);
+    if (state === 'open') return { state: 'open', instance: current };
+    const hasHistory = needsFreshPairing(config.metadata);
+    const rotate = (state === 'close' || state === 'missing') && hasHistory;
+    const instance = rotate ? `${config.base}--crm-${config.generation + 1}` : current;
+    if (state === 'unconfigured' || state === 'unavailable') {
+      return { state: 'close', instance, error: state === 'unconfigured' ? 'Chave da Evolution API não configurada.' : 'A Evolution API não respondeu. Tente novamente.' };
     }
 
+    if (state === 'connecting' && hasHistory) {
+      return { state: 'connecting', instance, error: 'A sessão anterior está reconectando. Desconecte a sessão antes de parear outro número.' };
+    }
+
+    const getQr = (json: { base64?: unknown; qrcode?: { base64?: unknown }; instance?: { state?: string }; state?: string }): EvolutionConnectResponse | null => {
+      if ((json.instance?.state ?? json.state) === 'open') return { state: 'open', instance };
+      const raw = json.base64 ?? json.qrcode?.base64;
+      if (typeof raw !== 'string' || !raw) return null;
+      const base64 = raw.startsWith('data:image/png;base64,') ? raw : `data:image/png;base64,${raw}`;
+      return { state: 'connecting', instance, base64 };
+    };
+
     try {
-      // Se forceNew for solicitado, desconecta a sessão antes de pedir novo QR Code
-      if (data?.forceNew) {
-        await fetch(`${url}/instance/logout/${instance}`, {
-          method: 'DELETE',
-          headers: { apikey: key },
-          signal: AbortSignal.timeout(6000),
-        }).catch(() => null);
-      }
-
-      // 1. Tenta conectar na instância
-      const connectRes = await fetch(`${url}/instance/connect/${instance}`, {
-        headers: { apikey: key },
-        signal: AbortSignal.timeout(8000),
-      });
-
-      if (connectRes.ok) {
-        const json = await connectRes.json();
-        if (json.instance?.state === 'open' || json.state === 'open') {
-          return { state: 'open', instance };
-        }
-        const rawBase64 = json.base64 || json.qrcode?.base64;
-        if (rawBase64) {
-          const base64Img = rawBase64.startsWith('data:') ? rawBase64 : `data:image/png;base64,${rawBase64}`;
-          return {
-            state: 'connecting',
-            base64: base64Img,
-            code: json.code || json.qrcode?.code || null,
-            pairingCode: json.pairingCode || json.qrcode?.pairingCode || null,
-            count: json.count || json.qrcode?.count || 1,
-            instance,
-          };
-        }
-      }
-
-      // 2. Se a instância não existir (404), cria automaticamente
-      if (connectRes.status === 404 || !connectRes.ok) {
-        const createRes = await fetch(`${url}/instance/create`, {
-          method: 'POST',
-          headers: { apikey: key, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            instanceName: instance,
-            qrcode: true,
-            integration: 'WHATSAPP-BAILEYS',
-          }),
+      if (state === 'missing' || rotate) {
+        const response = await fetch(`${url}/instance/create`, {
+          method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instanceName: instance, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
           signal: AbortSignal.timeout(10000),
         });
-
-        if (createRes.ok) {
-          const createJson = await createRes.json();
-          const qrcode = createJson.qrcode;
-          if (qrcode?.base64) {
-            const base64Img = qrcode.base64.startsWith('data:') ? qrcode.base64 : `data:image/png;base64,${qrcode.base64}`;
-            return {
-              state: 'connecting',
-              base64: base64Img,
-              code: qrcode.code || null,
-              pairingCode: qrcode.pairingCode || null,
-              count: 1,
-              instance,
-            };
-          }
+        if (!response.ok && response.status !== 409 && await readEvolutionState({ ...config, instance }) === 'missing') {
+          return { state: 'close', instance, error: `Não foi possível criar a instância desta conta (HTTP ${response.status}).` };
+        }
+        if (response.ok) {
+          const qr = getQr(await response.json());
+          if (qr) return qr;
         }
       }
-
-      // 3. Fallback: verifica se já está open no fetchInstances
-      const statusRes = await fetch(`${url}/instance/fetchInstances`, {
-        headers: { apikey: key },
-        signal: AbortSignal.timeout(6000),
+      const response = await fetch(`${url}/instance/connect/${instance}`, {
+        headers: { apikey: key }, signal: AbortSignal.timeout(10000),
       });
-      if (statusRes.ok) {
-        const raw = await statusRes.json();
-        const list = Array.isArray(raw) ? raw : raw.value || [];
-        const inst = list.find((i: any) => i.name === instance);
-        if (inst?.connectionStatus === 'open') {
-          return { state: 'open', instance };
-        }
-      }
-
-      return { state: 'connecting', instance, error: 'Aguardando geração do QR Code pela Evolution API...' };
-    } catch (err: any) {
-      return { state: 'close', instance, error: err.message || 'Falha ao conectar à Evolution API' };
+      if (!response.ok) return { state: 'close', instance, error: `Não foi possível gerar o QR (HTTP ${response.status}).` };
+      return getQr(await response.json()) ?? { state: 'connecting', instance };
+    } catch {
+      return { state: 'close', instance, error: 'Falha ao gerar o QR Code. Tente novamente.' };
     }
   });
 
@@ -222,12 +219,11 @@ export const getEvolutionConnectQr = createServerFn({ method: 'POST' })
  */
 export const logoutEvolutionInstance = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
-  .validator(z.object({
-    instance: z.string().optional(),
-  }).optional())
+  .validator(z.object({ accountId: whatsappAccountId, expectedInstance: z.string().max(100) }).strict())
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data?.instance);
+    const { url, key, instance } = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(instance, data.expectedInstance);
     if (!key) throw new Error('Evolution API não configurada.');
 
     try {
@@ -252,11 +248,11 @@ export const logoutEvolutionInstance = createServerFn({ method: 'POST' })
 export const restartEvolutionInstance = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
   .validator(z.object({
-    instance: z.string().optional(),
-  }).optional())
+    accountId: whatsappAccountId.optional(),
+  }).strict().optional())
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data?.instance);
+    const { url, key, instance } = await getEvolutionConfig(data?.accountId);
     if (!key) throw new Error('Evolution API não configurada.');
 
     try {
@@ -297,13 +293,14 @@ export type EvolutionChat = {
  */
 export const getEvolutionChats = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
-  .validator(z.object({ instance: z.string().optional() }).optional())
+  .validator(z.object({ accountId: whatsappAccountId, expectedInstance: z.string().max(100) }).strict())
   .handler(async ({ data, context }): Promise<EvolutionChat[]> => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data?.instance);
-    if (!key) return [];
+    const config = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(config.instance, data.expectedInstance);
+    await requireEvolutionConnection(config);
+    const { url, key, instance } = config;
     const lidToPhoneMap = new Map<string, string>();
-    const phoneToLidMap = new Map<string, string>();
 
     try {
       const [chatsRes, contactsRes, groupsRes] = await Promise.all([
@@ -314,12 +311,7 @@ export const getEvolutionChats = createServerFn({ method: 'POST' })
           signal: AbortSignal.timeout(12000),
         }).then(r => { if (!r.ok) throw new Error('Conversas indisponíveis'); return r.json(); }),
 
-        fetch(`${url}/chat/findContacts/${instance}`, {
-          method: 'POST',
-          headers: { apikey: key, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ where: {} }),
-          signal: AbortSignal.timeout(12000),
-        }).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+        getContacts(config),
 
         fetch(`${url}/group/fetchAllGroups/${instance}?getParticipants=false`, {
           headers: { apikey: key },
@@ -327,34 +319,17 @@ export const getEvolutionChats = createServerFn({ method: 'POST' })
         }).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       ]);
 
-      const contacts = Array.isArray(contactsRes) ? contactsRes : [];
       const groups = Array.isArray(groupsRes) ? groupsRes : [];
       const chats = Array.isArray(chatsRes) ? chatsRes : [];
-
-      const contactMap = new Map<string, any>();
-      for (const c of contacts) {
-        if (c.remoteJid) contactMap.set(c.remoteJid, c);
-        const digits = (c.remoteJid || '').split('@')[0];
-        if (digits) contactMap.set(digits, c);
-      }
-
-      const groupMap = new Map<string, any>();
+      const groupMap = new Map<string, WhatsAppProfile>();
       for (const g of groups) {
         if (g.id) groupMap.set(g.id, g);
       }
 
-      // Aprende mapeamentos LID <-> Telefone das mensagens recentes
-      for (const c of chats) {
-        const k = c.lastMessage?.key;
-        if (k?.remoteJid && k?.remoteJidAlt) {
-          if (k.remoteJid.endsWith('@lid') && k.remoteJidAlt.endsWith('@s.whatsapp.net')) {
-            lidToPhoneMap.set(k.remoteJid, k.remoteJidAlt);
-            phoneToLidMap.set(k.remoteJidAlt, k.remoteJid);
-          } else if (k.remoteJidAlt.endsWith('@lid') && k.remoteJid.endsWith('@s.whatsapp.net')) {
-            lidToPhoneMap.set(k.remoteJidAlt, k.remoteJid);
-            phoneToLidMap.set(k.remoteJid, k.remoteJidAlt);
-          }
-        }
+      // Learn only the phone/LID pairs explicitly associated on a provider message key.
+      for (const chat of chats) {
+        const pair = whatsappAddressPair(chat.lastMessage?.key);
+        if (pair && !lidToPhoneMap.has(pair.lid)) lidToPhoneMap.set(pair.lid, pair.phone);
       }
 
       const merged = new Map<string, EvolutionChat>();
@@ -366,71 +341,41 @@ export const getEvolutionChats = createServerFn({ method: 'POST' })
 
         const isGroup = c.remoteJid.endsWith('@g.us');
         const groupInfo = groupMap.get(c.remoteJid);
-        const lastKey = c.lastMessage?.key;
-        const mappedPhone = lidToPhoneMap.get(c.remoteJid);
-        const altJid = mappedPhone || lastKey?.remoteJidAlt || lastKey?.participantAlt || '';
-        const canonicalJid = (!isGroup && mappedPhone) ? mappedPhone : c.remoteJid;
-        const rawPhone = altJid ? altJid.split('@')[0] : (canonicalJid.split('@')[0] || '');
-        const contact = contactMap.get(canonicalJid) || contactMap.get(c.remoteJid) || (altJid ? contactMap.get(altJid) : null) || contactMap.get(rawPhone);
-
-        let name = '';
-        if (isGroup) {
-          name = groupInfo?.subject || c.pushName || 'Grupo WhatsApp';
-        } else {
-          const candidates = [
-            contact?.pushName,
-            contact?.name,
-            c.pushName,
-            c.lastMessage?.pushName !== 'Você' ? c.lastMessage?.pushName : null,
-          ].filter((n): n is string => Boolean(n && typeof n === 'string' && n.trim() && !/^\d{10,}$/.test(n.trim())));
-
-          name = candidates[0] || (rawPhone ? formatPhone(rawPhone) : 'Contato');
-        }
-
-        const lastMsgText = extractMessageText(c.lastMessage?.message);
-        const timestamp = c.lastMessage?.messageTimestamp
-          ? Number(c.lastMessage.messageTimestamp) * 1000
-          : c.updatedAt
-          ? new Date(c.updatedAt).getTime()
-          : Date.now();
-
-        const avatar = contact?.profilePicUrl || c.profilePicUrl || null;
-        const aliases = [c.remoteJid];
-        if (mappedPhone && !aliases.includes(mappedPhone)) aliases.push(mappedPhone);
-        if (altJid && !aliases.includes(altJid)) aliases.push(altJid);
+        const mappedPhone = lidToPhoneMap.get(c.remoteJid) || whatsappPhoneJid(c.remoteJid);
+        const canonicalJid = mappedPhone || c.remoteJid;
+        const aliases = Array.from(new Set([canonicalJid, c.remoteJid, ...[...lidToPhoneMap].filter(([, phone]) => phone === canonicalJid).map(([lid]) => lid)]));
+        const contact = whatsappContactProfile(canonicalJid, contactsRes, aliases);
+        const phone = isGroup ? 'Grupo' : contact.phone;
+        const name = isGroup
+          ? whatsappName(groupInfo?.subject, c.subject, contact.name, c.pushName) || 'Grupo WhatsApp'
+          : whatsappName(contact.name, c.name, c.pushName,
+              c.lastMessage?.key?.fromMe === false ? c.lastMessage?.pushName : null) || phone || 'Contato';
+        const timestamp = whatsappTimestamp(c.lastMessage?.messageTimestamp);
+        const avatar = cachedProfilePhoto(config, canonicalJid,
+          whatsappPhoto(groupInfo?.pictureUrl, groupInfo?.profilePicUrl, contact.avatar, c.profilePicUrl));
 
         const item: EvolutionChat = {
           id: canonicalJid,
           remoteJid: canonicalJid,
           name,
-          phone: isGroup ? 'Grupo' : formatPhone(rawPhone),
+          phone,
           unreadCount: c.unreadCount || 0,
-          lastMessage: lastMsgText,
+          lastMessage: c.lastMessage?.message ? extractMessageText(c.lastMessage.message) : '',
           timestamp,
           isGroup,
           avatar,
           aliases,
         };
 
-        if (merged.has(canonicalJid)) {
-          const old = merged.get(canonicalJid)!;
-          if (item.timestamp >= old.timestamp) {
-            merged.set(canonicalJid, {
-              ...item,
-              name: old.name && old.name !== old.phone ? old.name : item.name,
-              unreadCount: (old.unreadCount || 0) + (item.unreadCount || 0),
-              aliases: Array.from(new Set([...(old.aliases || []), ...(item.aliases || [])])),
-            });
-          } else {
-            merged.set(canonicalJid, {
-              ...old,
-              unreadCount: (old.unreadCount || 0) + (item.unreadCount || 0),
-              aliases: Array.from(new Set([...(old.aliases || []), ...(item.aliases || [])])),
-            });
-          }
-        } else {
-          merged.set(canonicalJid, item);
-        }
+        const old = merged.get(canonicalJid);
+        const [latest, other] = old && old.timestamp > item.timestamp ? [old, item] : [item, old];
+        merged.set(canonicalJid, other ? {
+          ...latest,
+          name: latest.name === 'Contato' || latest.name === latest.phone ? other.name : latest.name,
+          avatar: latest.avatar || other.avatar,
+          unreadCount: Math.max(latest.unreadCount, other.unreadCount),
+          aliases: Array.from(new Set([...(latest.aliases || []), ...(other.aliases || [])])),
+        } : latest);
       }
 
       return Array.from(merged.values()).sort((a, b) => b.timestamp - a.timestamp);
@@ -443,6 +388,7 @@ export type EvolutionMessage = {
   id: string;
   fromMe: boolean;
   sender: string;
+  senderAvatar?: string | null;
   text: string;
   timestamp: string; // HH:mm
   date: string; // dd/mm
@@ -450,7 +396,9 @@ export type EvolutionMessage = {
   mediaUrl?: string | undefined;
   caption?: string | undefined;
   fileName?: string | undefined;
-  reaction?: string | undefined;
+  sentAt: number;
+  remoteJid: string;
+  participant?: string | undefined;
   quotedText?: string | undefined;
   starred?: boolean | undefined;
 };
@@ -461,16 +409,19 @@ export type EvolutionMessage = {
 export const getEvolutionMessages = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
   .validator(z.object({
-    remoteJid: z.string().min(1),
-    instance: z.string().optional(),
-  }))
-  .handler(async ({ data, context }): Promise<EvolutionMessage[]> => {
+    remoteJid: z.string().regex(/^[\d:-]+@(s\.whatsapp\.net|c\.us|lid|g\.us)$/),
+    aliases: z.array(z.string().max(80)).max(4).optional(),
+    accountId: whatsappAccountId,
+    expectedInstance: z.string().max(100),
+  }).strict())
+  .handler(async ({ data, context }): Promise<{ messages: EvolutionMessage[]; reactions: WhatsAppReaction[]; aliases: string[]; phone: string }> => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data.instance);
-    if (!key) return [];
+    const { url, key, instance } = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(instance, data.expectedInstance);
+    await requireEvolutionConnection({ url, key, instance });
 
     try {
-      const aliases = [data.remoteJid];
+      const aliases = whatsappHistoryJids(data.remoteJid, data.aliases);
       const fetchJid = async (jid: string) => {
         try {
           const res = await fetch(`${url}/chat/findMessages/${instance}`, {
@@ -497,6 +448,11 @@ export const getEvolutionMessages = createServerFn({ method: 'POST' })
       };
 
       const results = await Promise.all(aliases.map(fetchJid));
+      if (aliases.length === 1 && !data.remoteJid.endsWith('@g.us')) {
+        const pair = results.flat().map(row => whatsappAddressPair(row.key)).find(pair => pair && (pair.lid === data.remoteJid || pair.phone === whatsappPhoneJid(data.remoteJid)));
+        const other = pair && (pair.lid === data.remoteJid ? pair.phone : pair.lid);
+        if (other) { aliases.push(other); results.push(await fetchJid(other)); }
+      }
       const seen = new Map<string, any>();
       for (const list of results) {
         for (const r of list) {
@@ -507,9 +463,13 @@ export const getEvolutionMessages = createServerFn({ method: 'POST' })
         }
       }
 
-      const records = Array.from(seen.values()).sort(
-        (a, b) => Number(a.messageTimestamp || 0) - Number(b.messageTimestamp || 0)
+      const allRecords = Array.from(seen.values());
+      const reactions = allRecords.map(readWhatsAppReaction).filter((reaction): reaction is WhatsAppReaction => Boolean(reaction));
+      const records = allRecords.filter(row => !row.message?.reactionMessage).sort(
+        (a, b) => whatsappTimestamp(a.messageTimestamp) - whatsappTimestamp(b.messageTimestamp)
       );
+      const isGroup = data.remoteJid.endsWith('@g.us');
+      const contacts = isGroup ? await getContacts({ url, key, instance }) : new Map<string, WhatsAppProfile>();
 
       // Para mensagens com mídia (imagem, áudio, vídeo, documento), busca o base64 descriptografado via Evolution API
       const mediaRecords = records.filter(
@@ -553,11 +513,13 @@ export const getEvolutionMessages = createServerFn({ method: 'POST' })
         })
       );
 
-      return records.map((r: any) => {
+      const messages = records.map((r: any): EvolutionMessage => {
         const text = extractMessageText(r.message);
-        const d = r.messageTimestamp ? new Date(Number(r.messageTimestamp) * 1000) : new Date();
-        const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-        const ddmm = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const sentAt = whatsappTimestamp(r.messageTimestamp);
+        const participant = r.key?.participant || r.participant || r.key?.participantAlt;
+        const participantProfile = isGroup && participant && !r.key?.fromMe
+          ? whatsappContactProfile(participant, contacts, r.key?.participantAlt ? [r.key.participantAlt] : [])
+          : undefined;
 
         let mediaType: EvolutionMessage["mediaType"] = undefined;
         let mediaUrl: string | undefined = undefined;
@@ -592,10 +554,16 @@ export const getEvolutionMessages = createServerFn({ method: 'POST' })
         return {
           id: r.key?.id || r.id || crypto.randomUUID(),
           fromMe: Boolean(r.key?.fromMe),
-          sender: r.key?.fromMe ? 'Você' : r.pushName || 'Cliente',
+          sender: r.key?.fromMe ? 'Você' : whatsappName(participantProfile?.name, r.pushName) ||
+            participantProfile?.phone || (isGroup ? 'Participante' : 'Cliente'),
+          senderAvatar: participantProfile && participant
+            ? cachedProfilePhoto({ url, key, instance }, participant, participantProfile.avatar) : null,
           text,
-          timestamp: hhmm,
-          date: ddmm,
+          timestamp: whatsappHour(sentAt),
+          sentAt,
+          remoteJid: r.key?.remoteJid || data.remoteJid,
+          participant,
+          date: whatsappDate(sentAt),
           mediaType,
           mediaUrl,
           caption,
@@ -603,9 +571,9 @@ export const getEvolutionMessages = createServerFn({ method: 'POST' })
           quotedText,
         };
       });
-    } catch (err) {
-      console.error('[Evolution API] Falha ao buscar mensagens:', err);
-      return [];
+      return { messages, reactions, aliases, phone: aliases.map(whatsappPhone).find(Boolean) || '' };
+    } catch {
+      throw new Error('Não foi possível atualizar as mensagens. O histórico atual foi preservado.');
     }
   });
 
@@ -616,12 +584,14 @@ export const markEvolutionChatAsRead = createServerFn({ method: 'POST' })
   .middleware([requireSupabaseAuth])
   .validator(z.object({
     remoteJid: z.string().min(1),
-    instance: z.string().optional(),
-  }))
+    accountId: whatsappAccountId,
+    expectedInstance: z.string().max(100),
+  }).strict())
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data.instance);
-    if (!key) return { success: false };
+    const { url, key, instance } = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(instance, data.expectedInstance);
+    await requireEvolutionConnection({ url, key, instance });
 
     try {
       const response = await fetch(`${url}/chat/markMessageAsRead/${instance}`, {
@@ -655,12 +625,14 @@ export const sendEvolutionMessage = createServerFn({ method: 'POST' })
     remoteJid: z.string().optional(),
     text: z.string().min(1),
     quotedId: z.string().optional(),
-    instance: z.string().optional(),
-  }))
+    accountId: whatsappAccountId,
+    expectedInstance: z.string().max(100),
+  }).strict())
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data.instance);
-    if (!key) throw new Error('Evolution API não configurada.');
+    const { url, key, instance } = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(instance, data.expectedInstance);
+    await requireEvolutionConnection({ url, key, instance });
 
     let destination = (data.number || data.remoteJid || '').trim();
     if (!destination) {
@@ -726,12 +698,14 @@ export const sendEvolutionMedia = createServerFn({ method: 'POST' })
     media: z.string().min(1), // base64 data URL ou URL pública
     caption: z.string().optional(),
     fileName: z.string().optional(),
-    instance: z.string().optional(),
-  }))
+    accountId: whatsappAccountId,
+    expectedInstance: z.string().max(100),
+  }).strict())
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data.instance);
-    if (!key) throw new Error('Evolution API não configurada.');
+    const { url, key, instance } = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(instance, data.expectedInstance);
+    await requireEvolutionConnection({ url, key, instance });
 
     let destination = (data.number || data.remoteJid || '').trim();
     if (!destination) {
@@ -790,12 +764,14 @@ export const sendEvolutionAudio = createServerFn({ method: 'POST' })
     number: z.string().optional(),
     remoteJid: z.string().optional(),
     audio: z.string().min(1), // base64
-    instance: z.string().optional(),
-  }))
+    accountId: whatsappAccountId,
+    expectedInstance: z.string().max(100),
+  }).strict())
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data.instance);
-    if (!key) throw new Error('Evolution API não configurada.');
+    const { url, key, instance } = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(instance, data.expectedInstance);
+    await requireEvolutionConnection({ url, key, instance });
 
     let destination = (data.number || data.remoteJid || '').trim();
     if (!destination) {
@@ -849,13 +825,16 @@ export const sendEvolutionReaction = createServerFn({ method: 'POST' })
     remoteJid: z.string().min(1),
     messageId: z.string().min(1),
     fromMe: z.boolean(),
-    reaction: z.string().min(1),
-    instance: z.string().optional(),
-  }))
+    reaction: z.string().max(32),
+    participant: z.string().max(80).optional(),
+    accountId: whatsappAccountId,
+    expectedInstance: z.string().max(100),
+  }).strict())
   .handler(async ({ data, context }) => {
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
-    const { url, key, instance } = getEvolutionConfig(data.instance);
-    if (!key) throw new Error('Evolution API não configurada.');
+    const { url, key, instance } = await getEvolutionConfig(data.accountId);
+    requireExpectedInstance(instance, data.expectedInstance);
+    await requireEvolutionConnection({ url, key, instance });
 
     const res = await fetch(`${url}/message/sendReaction/${instance}`, {
       method: 'POST',
@@ -868,6 +847,7 @@ export const sendEvolutionReaction = createServerFn({ method: 'POST' })
           remoteJid: data.remoteJid,
           fromMe: data.fromMe,
           id: data.messageId,
+          ...(data.participant ? { participant: data.participant } : {}),
         },
         reaction: data.reaction,
       }),

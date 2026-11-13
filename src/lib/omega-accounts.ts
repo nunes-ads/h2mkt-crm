@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { defaultWhatsAppInstances, type WhatsAppAccountId } from './whatsapp-connection';
 
 export type Subconta = {
-  id: string;
+  id: WhatsAppAccountId;
   nome: string;
   tipo: "Matriz" | "Franquia";
   resp: string;
@@ -20,7 +21,7 @@ export const CONTA_MATRIZ: Subconta = {
   resp: "Diretoria Geral",
   email: "contato@grupoomega.com.br",
   plano: "rede",
-  instanceName: "teste-local",
+  instanceName: defaultWhatsAppInstances.matriz,
   whatsappPhone: "(61) 99665-846",
   cor: "var(--lime)",
   loja: "Todas as Lojas (Matriz)",
@@ -33,7 +34,7 @@ export const SUBCONTA_MVP: Subconta = {
   resp: "Ariel Gama",
   email: "asasul@grupoomega.com.br",
   plano: "pro",
-  instanceName: "franquia-asasul",
+  instanceName: defaultWhatsAppInstances['sub-asasul'],
   whatsappPhone: "(61) 99123-4567",
   cor: "#a855f7",
   loja: "Asa Sul",

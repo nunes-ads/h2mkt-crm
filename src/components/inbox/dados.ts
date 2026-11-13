@@ -1,3 +1,5 @@
+import type { WhatsAppReaction } from '@/lib/whatsapp-history';
+
 export type Kind = "cliente" | "hudson" | "vendedor" | "sistema" | "nota";
 export type Mensagem = {
   id: string;
@@ -5,11 +7,15 @@ export type Mensagem = {
   text: string;
   t: string;
   nome?: string | undefined;
+  senderAvatar?: string | null | undefined;
   mediaType?: "image" | "video" | "audio" | "document" | undefined;
   mediaUrl?: string | undefined;
   caption?: string | undefined;
   fileName?: string | undefined;
-  reaction?: string | undefined;
+  reactions?: WhatsAppReaction[] | undefined;
+  sentAt?: number | undefined;
+  remoteJid?: string | undefined;
+  participant?: string | undefined;
   quotedText?: string | undefined;
   quotedSender?: string | undefined;
   starred?: boolean | undefined;
@@ -78,6 +84,7 @@ export type BastidoresData = {
 };
 
 export type Conversa = {
+  resultado?: "Ganho" | "Perdido" | undefined;
   aliases?: string[] | undefined;
   id: string;
   nome: string;
@@ -92,6 +99,7 @@ export type Conversa = {
   perda: string | null;
   agente: string;
   data: string; // dd/mm do último contato
+  lastMessageAt?: number | undefined;
   esperaMin: number | null; // tempo desde a última mensagem
   arquivada: boolean;
   naoLida: number;

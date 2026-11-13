@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { Link, useRouteContext } from "@tanstack/react-router";
+import { mergeWhatsAppHistory, whatsappPhone } from "@/lib/whatsapp-history";
+import { whatsappDate, whatsappDayKey, whatsappDayLabel, whatsappHour, whatsappListTime, whatsappMessageTime } from "@/lib/whatsapp-time";
+import { whatsappName } from "@/lib/whatsapp-profiles";
+import { useWhatsAppConnection } from "@/hooks/use-whatsapp-connection";
+import { WHATSAPP_POLL_INTERVAL, whatsappErrorMessage, whatsappStatusLabel } from "@/lib/whatsapp-connection";
 import { useDeals } from "@/lib/omega-demo";
-import { useActiveAccount } from "@/lib/omega-accounts";
+import { useActiveAccount, type Subconta } from "@/lib/omega-accounts";
 import {
   getEvolutionChats,
   getEvolutionMessages,
@@ -9,7 +15,6 @@ import {
   sendEvolutionMedia,
   sendEvolutionAudio,
   sendEvolutionReaction,
-  getEvolutionStatus,
   markEvolutionChatAsRead,
   type EvolutionStatusResponse,
 } from "@/lib/evolution.functions";
@@ -190,16 +195,66 @@ const EMOJI_CATEGORIAS = {
 
 const REACOES_RAPIDAS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
-const hhmm = () => {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-};
+const hhmm = () => whatsappHour(Date.now());
+
+function WhatsAppAvatar({ name, photo, size }: { name: string; photo?: string | null | undefined; size?: number }) {
+  const [failedPhoto, setFailedPhoto] = useState<string | null>(null);
+  return (
+    <div className="wa-avatar" style={size ? { width: size, height: size, flexBasis: size } : undefined}>
+      {photo && photo !== failedPhoto ? (
+        <img src={photo} alt={name} onError={() => setFailedPhoto(photo)} referrerPolicy="no-referrer" />
+      ) : iniciais(name)}
+    </div>
+  );
+}
+
+function lastMessageAt(chat: Conversa) {
+  return chat.msgs.reduce((latest, message) =>
+    message.kind === "nota" || message.kind === "sistema"
+      ? latest : Math.max(latest, whatsappMessageTime(message.sentAt)),
+    whatsappMessageTime(chat.lastMessageAt));
+}
 
 const formatTimer = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
-export function Inbox({ initialId }: { initialId?: string }) {
-  const { activeAccount, isSubconta } = useActiveAccount();
-  const [lista, setLista] = useDeals();
+export function Inbox(props: { initialId?: string }) {
+  const { activeAccount } = useActiveAccount();
+  return <AccountInboxConnection key={activeAccount.id} account={activeAccount} {...props} />;
+}
+
+function AccountInboxConnection({ account, initialId }: { account: Subconta; initialId?: string }) {
+  const { status, error, refresh, checking } = useWhatsAppConnection(account.id);
+  if (status?.state !== 'open') {
+    const label = error ? 'Não foi possível acessar o WhatsApp' : status ? whatsappStatusLabel[status.state] : 'Verificando conexão do WhatsApp';
+    return <section className="card wa-connection-empty" aria-live="polite">
+      <MessageCircle size={26} aria-hidden="true" />
+      <h2 className="t-h3">{label}</h2>
+      <p>{account.nome}</p>
+      {error ? <p role="alert">{whatsappErrorMessage(error)}</p> : status && <p className="t-caption">{status.state === 'unavailable' ? 'Verifique se o servidor da Evolution está disponível e tente novamente.' : 'Abra Canais para conectar o número desta conta.'}</p>}
+      <div className="om-toolbar">
+        <Link to="/canais" className="btn btn-primary btn-sm">Abrir Canais</Link>
+        <button type="button" className="btn btn-outline btn-sm" disabled={checking} onClick={() => void refresh()}>Verificar conexão</button>
+      </div>
+    </section>;
+  }
+  return <ConnectedInbox key={status.instance} activeAccount={account} evoStatus={status} carregarStatus={refresh} {...(initialId ? { initialId } : {})} />;
+}
+
+function ConnectedInbox({ initialId, activeAccount, evoStatus, carregarStatus }: {
+  initialId?: string;
+  activeAccount: Subconta;
+  evoStatus: EvolutionStatusResponse;
+  carregarStatus: () => Promise<unknown>;
+}) {
+  const isSubconta = activeAccount.id !== 'matriz';
+  const { user } = useRouteContext({ from: '/_authenticated' });
+  const [lista, setLista] = useDeals(activeAccount.id, evoStatus.instance);
+  const instanceName = evoStatus.instance;
+  const activeRef = useRef(true);
+  const syncingChatsRef = useRef(false);
+  const syncingMessagesRef = useRef(new Set<string>());
+  const reactingRef = useRef(new Set<string>());
+  const [syncError, setSyncError] = useState('');
 
   // Estados de busca e filtros
   const [busca, setBusca] = useState("");
@@ -210,7 +265,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
   const [selId, setSelId] = useState(initialId ?? "");
 
   // Conversa ativa selecionada
-  const sel = useMemo(() => lista.find((c) => c.id === selId) ?? null, [lista, selId]);
+  const sel = useMemo(() => lista.find((c) => c.id === selId) ?? lista.find((c) => c.aliases?.includes(selId)) ?? null, [lista, selId]);
 
   const atualizarConversa = useCallback(
     (id: string, updater: (c: Conversa) => Conversa) => {
@@ -294,7 +349,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
   const [jobs, setJobs] = useState<WaJob[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const s = localStorage.getItem("wa-business-jobs");
+      const s = localStorage.getItem(`wa-business-jobs:${user!.id}:${activeAccount.id}`);
       return s ? JSON.parse(s) : [];
     } catch {
       return [];
@@ -338,15 +393,14 @@ export function Inbox({ initialId }: { initialId?: string }) {
   }, [replies]);
 
   useEffect(() => {
-    localStorage.setItem("wa-business-jobs", JSON.stringify(jobs));
-  }, [jobs]);
+    localStorage.setItem(`wa-business-jobs:${user!.id}:${activeAccount.id}`, JSON.stringify(jobs));
+  }, [jobs, user, activeAccount.id]);
 
   useEffect(() => {
     localStorage.setItem("wa-business-automation", JSON.stringify(automation));
   }, [automation]);
 
   // Server functions da Evolution API e IA Chatbot
-  const fetchEvoStatus = useServerFn(getEvolutionStatus);
   const fetchEvoChats = useServerFn(getEvolutionChats);
   const fetchEvoMessages = useServerFn(getEvolutionMessages);
   const sendEvoMsg = useServerFn(sendEvolutionMessage);
@@ -358,14 +412,12 @@ export function Inbox({ initialId }: { initialId?: string }) {
 
   // Autonomous delivery requires a durable, tenant-scoped workflow (not browser flags).
   const iaGlobalAtiva = false;
-  const iaChatsAtivos = useMemo<string[]>(() => [], []);
 
   // Sugestões de resposta rápida e status de geração da IA
   const [chatSuggestions, setChatSuggestions] = useState<string[]>([]);
   const [gerandoIa, setGerandoIa] = useState(false);
 
 
-  const [evoStatus, setEvoStatus] = useState<EvolutionStatusResponse | null>(null);
   const [syncingEvo, setSyncingEvo] = useState(false);
   const [carregandoMsgs, setCarregandoMsgs] = useState(false);
 
@@ -378,8 +430,6 @@ export function Inbox({ initialId }: { initialId?: string }) {
   const [painelBastidoresAberto, setPainelBastidoresAberto] = useState(true);
 
   // Controle de mensagens processadas para resposta automática
-  const processedAiMessagesRef = useRef<Set<string>>(new Set());
-  const isReplyingAiRef = useRef<Set<string>>(new Set());
 
   // Modo de composição: mensagem para o WhatsApp ou nota interna privada (RN-044)
   const [modoComposicao, setModoComposicao] = useState<"mensagem" | "nota">("mensagem");
@@ -442,167 +492,9 @@ export function Inbox({ initialId }: { initialId?: string }) {
     textareaRef.current.style.overflowY = scrollHeight > maxHeight ? "auto" : "hidden";
   }, [draft]);
 
-  // Checa status da instância correspondente à conta ativa
-  const carregarStatus = useCallback(async () => {
-    try {
-      const st = await fetchEvoStatus({ data: { instance: activeAccount.instanceName } });
-      setEvoStatus(st);
-    } catch (err) {
-      setEvoStatus({ configured: false, state: err instanceof Error ? err.message : "Integração indisponível", instance: activeAccount.instanceName, phone: null, profilePicUrl: null, count: 0, contactsCount: 0, chatsCount: 0 });
-    }
-  }, [fetchEvoStatus, activeAccount.instanceName]);
-
-  // Executa a resposta inteligente da IA para o WhatsApp
-  const responderComIa = useCallback(
-    async (
-      remoteJid: string,
-      chatNome: string,
-      chatTel: string,
-      historicoMsgs: Array<{ fromMe: boolean; text: string; id: string }>,
-      carro?: string,
-      etapa?: string
-    ) => {
-      if (isReplyingAiRef.current.has(remoteJid)) return;
-      isReplyingAiRef.current.add(remoteJid);
-      setGerandoIa(true);
-
-      try {
-        const apiMessages = historicoMsgs
-          .slice(-15)
-          .map((m) => ({
-            role: m.fromMe ? ("assistant" as const) : ("user" as const),
-            content: m.text || "",
-          }))
-          .filter((m) => m.content.trim().length > 0);
-
-        if (apiMessages.length === 0) return;
-
-        const res = await callGenerateAi({
-          data: {
-            messages: apiMessages,
-            contactName: chatNome,
-            contactPhone: chatTel,
-            carro: carro || "",
-            etapa: etapa || "Abordagem",
-          },
-        });
-
-        if (res && res.replyText) {
-          const { cleanContent, suggestions, bastidores } = parseAiOutput(res.rawReply || res.replyText);
-          const textoParaEnviar = cleanContent || res.replyText;
-
-          // Envia resposta via Evolution API para o WhatsApp (APENAS o texto limpo, nunca os bastidores!)
-          await sendEvoMsg({
-            data: {
-              number: remoteJid,
-              remoteJid,
-              text: textoParaEnviar,
-              instance: activeAccount.instanceName,
-            },
-          }).catch((err) => console.warn("Aviso ao enviar via Evolution API:", err));
-
-          const novaMsg: Mensagem = {
-            id: crypto.randomUUID(),
-            kind: "vendedor",
-            text: textoParaEnviar,
-            t: hhmm(),
-            nome: "Hudson (IA)",
-          };
-
-          setLista((prev) =>
-            prev.map((c) => {
-              if (c.id !== remoteJid && !c.aliases?.includes(remoteJid)) return c;
-
-              let novaEtapa = c.etapa;
-              if (bastidores?.etapa) {
-                const e = bastidores.etapa.toLowerCase();
-                if (e.includes("pesquisa") || e.includes("descoberta") || e.startsWith("p")) novaEtapa = "Descoberta da necessidade";
-                else if (e.includes("orçamento") || e.includes("proposta") || e.startsWith("o")) novaEtapa = "Proposta";
-                else if (e.includes("negociação") || e.startsWith("n")) novaEtapa = "Negociação";
-                else if (e.includes("agend") || e.startsWith("t") || e.startsWith("e")) novaEtapa = "Agendamento";
-                else if (e.includes("abordagem") || e.startsWith("a")) novaEtapa = "Abordagem";
-              }
-
-              const novasTags = new Set(c.tags || []);
-              if (bastidores?.etiqueta) novasTags.add(bastidores.etiqueta);
-
-              return {
-                ...c,
-                msgs: [...c.msgs, novaMsg],
-                etapa: novaEtapa,
-                tags: Array.from(novasTags),
-                bastidores: bastidores || c.bastidores,
-                esperaMin: null,
-                data: "Hoje",
-                log: [{ t: hhmm(), text: `Hudson respondeu automaticamente (${res.model})` }, ...c.log],
-              };
-            })
-          );
-
-          if (suggestions && suggestions.length > 0) {
-            setChatSuggestions(suggestions);
-          }
-
-          dispararPopup("IA Hudson", `Hudson respondeu automaticamente para ${chatNome}`, remoteJid);
-          if (prefs.sound) playWebAudioBeep(prefs.volume);
-          setTimeout(() => scrollToBottom(true, true), 100);
-        }
-      } catch (err) {
-        console.error("Erro ao gerar resposta automática da IA:", err);
-      } finally {
-        isReplyingAiRef.current.delete(remoteJid);
-        setGerandoIa(false);
-      }
-    },
-    [callGenerateAi, sendEvoMsg, activeAccount.instanceName, setLista, dispararPopup, prefs.sound, prefs.volume, scrollToBottom]
-  );
-
-  // Alterna o status da IA para uma conversa específica
-  const alternarIaConversa = useCallback(
-    (remoteJid: string) => {
-      setLista((prev) => {
-        const chat = prev.find((c) => c.id === remoteJid || c.aliases?.includes(remoteJid));
-        const novoEstado = !chat?.iaAtiva;
-        setIaChatsAtivos((old) => {
-          const set = new Set(old);
-          if (novoEstado) set.add(remoteJid);
-          else set.delete(remoteJid);
-          const arr = Array.from(set);
-          localStorage.setItem("omega_ia_active_chats", JSON.stringify(arr));
-          return arr;
-        });
-        dispararPopup(
-          "IA Hudson",
-          novoEstado
-            ? `🤖 IA ativada para ${chat?.nome || remoteJid}`
-            : `🤖 IA desativada para ${chat?.nome || remoteJid}`,
-          remoteJid
-        );
-
-        if (novoEstado && chat && chat.msgs.length > 0) {
-          const ult = chat.msgs[chat.msgs.length - 1];
-          if (ult && ult.kind === "cliente" && !processedAiMessagesRef.current.has(ult.id)) {
-            processedAiMessagesRef.current.add(ult.id);
-            setTimeout(() => {
-              void responderComIa(
-                remoteJid,
-                chat.nome || "Cliente",
-                chat.tel || "",
-                chat.msgs.map((m) => ({ fromMe: m.kind === "vendedor", text: m.text, id: m.id })),
-                chat.carro,
-                chat.etapa
-              );
-            }, 300);
-          }
-        }
-
-        return prev.map((c) =>
-          c.id === remoteJid || c.aliases?.includes(remoteJid) ? { ...c, iaAtiva: novoEstado } : c
-        );
-      });
-    },
-    [setLista, dispararPopup, responderComIa]
-  );
+  const alternarIaConversa = useCallback(() => {
+    dispararPopup('IA em revisão humana', 'Use Sugerir resposta para revisar uma mensagem antes de enviar.');
+  }, [dispararPopup]);
 
   // Sugerir resposta com IA manualmente para o atendente
   const sugerirRespostaIa = useCallback(async () => {
@@ -647,12 +539,17 @@ export function Inbox({ initialId }: { initialId?: string }) {
 
   // Sincroniza conversas da Evolution API para a instância da conta ativa
   const sincronizarChats = useCallback(async (selecionarPrimeiro = false, silencioso = false) => {
+    if (!activeRef.current || syncingChatsRef.current) return;
+    syncingChatsRef.current = true;
     if (!silencioso) setSyncingEvo(true);
     try {
-      const chats = await fetchEvoChats({ data: { instance: activeAccount.instanceName } });
-      if (chats && chats.length > 0) {
+      const chats = await fetchEvoChats({ data: { accountId: activeAccount.id, expectedInstance: instanceName } });
+      if (!activeRef.current) return;
+      setSyncError("");
+      {
         const evoConversas: Conversa[] = chats.map((c) => ({
           id: c.remoteJid,
+          aliases: c.aliases,
           nome: c.name || c.phone,
           tel: c.phone,
           avatar: c.avatar,
@@ -665,27 +562,29 @@ export function Inbox({ initialId }: { initialId?: string }) {
           valor: 0,
           perda: null,
           agente: isSubconta ? activeAccount.resp : "Atendente",
-          data: "Hoje",
-          esperaMin: c.unreadCount > 0 ? 1 : null,
+          data: whatsappDate(c.timestamp),
+          lastMessageAt: c.timestamp,
+          esperaMin: c.unreadCount > 0 && c.timestamp > 0
+            ? Math.max(0, Math.floor((Date.now() - c.timestamp) / 60000)) : null,
           arquivada: false,
           naoLida: c.unreadCount,
           tags: c.isGroup ? ["grupo"] : ["whatsapp"],
           msgs: c.lastMessage
-            ? [{ id: crypto.randomUUID(), kind: "cliente", text: c.lastMessage, t: "Recente" }]
+            ? [{ id: `preview:${c.remoteJid}`, kind: "cliente", text: c.lastMessage, t: whatsappHour(c.timestamp), sentAt: c.timestamp }]
             : [],
           ficha: [],
           ag: null,
-          log: [{ t: hhmm(), text: `sincronizado com Evolution (${activeAccount.instanceName})` }],
-          iaAtiva: iaChatsAtivos.includes(c.remoteJid),
+          log: [{ t: hhmm(), text: `sincronizado com Evolution (${instanceName})` }],
+          iaAtiva: false,
         }));
 
         setLista((prev) => {
           const filtrados = prev.filter(
             (p) => p.id.includes("@") && !["d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9"].includes(p.id)
           );
-          const map = new Map(filtrados.map((x) => [x.id, x]));
+          const map = new Map(filtrados.flatMap(chat => [chat.id, ...(chat.aliases ?? [])].map(id => [id, chat] as const)));
 
-          return evoConversas.map((novo, index) => {
+          const merged = evoConversas.map((novo, index) => {
             const rawChat = chats[index];
             let existente = map.get(novo.id);
             if (!existente && rawChat?.aliases) {
@@ -698,17 +597,25 @@ export function Inbox({ initialId }: { initialId?: string }) {
             }
 
             if (existente) {
-              const nomeFinal = (novo.nome && !/^\d{10,}$/.test(novo.nome))
-                ? novo.nome
-                : (existente.nome || novo.nome);
+              const nomeFinal = (novo.nome !== "Contato" && novo.nome !== "Grupo WhatsApp" && whatsappName(novo.nome))
+                || existente.nome || novo.nome;
+              const existingHistory = existente.msgs.filter(message => !message.id.startsWith("preview:"));
 
               return {
                 ...novo,
                 nome: nomeFinal,
-                tel: novo.tel || existente.tel,
+                tel: novo.tel || whatsappPhone(existente.id) || existente.aliases?.map(whatsappPhone).find(Boolean) || "",
+                aliases: Array.from(new Set([novo.id, existente.id, ...(novo.aliases ?? []), ...(existente.aliases ?? [])])),
+                id: whatsappPhone(novo.id) ? novo.id : whatsappPhone(existente.id) ? existente.id : novo.id,
                 avatar: novo.avatar || existente.avatar,
                 etapa: existente.etapa,
                 status: existente.status,
+                arquivada: existente.arquivada,
+                perda: existente.perda,
+                resultado: existente.resultado,
+                ficha: existente.ficha,
+                ag: existente.ag,
+                log: existente.log,
                 carro: existente.carro || novo.carro,
                 loja: existente.loja || novo.loja,
                 valor: existente.valor || novo.valor,
@@ -717,23 +624,15 @@ export function Inbox({ initialId }: { initialId?: string }) {
                 tags: existente.tags?.length ? existente.tags : novo.tags,
                 notas: existente.notas,
                 lembrete: existente.lembrete,
-                msgs: existente.msgs && existente.msgs.length > 1 ? existente.msgs : (novo.msgs.length > 0 ? novo.msgs : existente.msgs),
+                msgs: existingHistory.length ? existingHistory : novo.msgs,
                 iaAtiva: false,
               };
             }
             return novo;
           });
+          const known = new Set(chats.flatMap(chat => [chat.remoteJid, ...(chat.aliases ?? [])]));
+          return [...merged, ...prev.filter(chat => !known.has(chat.id) && chat.log.some(event => event.text === "Conversa criada manualmente"))];
         });
-
-        // Sincroniza em segundo plano conversas que estejam com IA ativa e possuam mensagens não lidas
-        if (silencioso) {
-          evoConversas.forEach((ec) => {
-            const ehAtivo = ec.iaAtiva || iaChatsAtivos.includes(ec.id);
-            if (ehAtivo && ec.id !== selId && ec.naoLida > 0) {
-              void carregarMensagens(ec.id, true);
-            }
-          });
-        }
 
         // Atualiza seleção caso selId seja vazio ou aponte para um ID unificado/alias
         setSelId((cur) => {
@@ -745,159 +644,96 @@ export function Inbox({ initialId }: { initialId?: string }) {
         });
       }
     } catch (err) {
-      console.error("Falha ao sincronizar conversas do WhatsApp:", err);
+      if (activeRef.current) {
+        setSyncError(err instanceof Error ? err.message : "Falha ao atualizar as conversas.");
+        void carregarStatus();
+      }
     } finally {
-      setSyncingEvo(false);
+      syncingChatsRef.current = false;
+      if (activeRef.current) setSyncingEvo(false);
     }
-  }, [fetchEvoChats, setLista, activeAccount.instanceName, activeAccount.loja, activeAccount.resp, isSubconta, iaChatsAtivos, selId]);
+  }, [fetchEvoChats, setLista, activeAccount.id, instanceName, activeAccount.loja, activeAccount.resp, isSubconta, carregarStatus]);
 
   // Carrega histórico de mensagens
-  const carregarMensagens = useCallback(async (remoteJid: string, silencioso = false) => {
-    if (!remoteJid || !remoteJid.includes("@")) return;
+  const carregarMensagens = useCallback(async (remoteJid: string, silencioso = false, aliases: string[] = []) => {
+    if (!activeRef.current || !remoteJid.includes("@") || syncingMessagesRef.current.has(remoteJid)) return;
+    syncingMessagesRef.current.add(remoteJid);
     if (!silencioso) setCarregandoMsgs(true);
 
     try {
-      const history = await fetchEvoMessages({ data: { remoteJid, instance: activeAccount.instanceName } });
-      if (history && history.length > 0) {
-        const seen = new Set<string>();
-        const uniqueHistory = history.filter((m) => {
-          if (seen.has(m.id)) return false;
-          seen.add(m.id);
-          return true;
-        });
-
-        const ultimo = uniqueHistory[uniqueHistory.length - 1];
-
-        setLista((prev) => {
-          const chat = prev.find((c) => c.id === remoteJid || c.aliases?.includes(remoteJid));
-          const currentCount = chat?.msgs.length || 0;
-          if (silencioso && uniqueHistory.length > currentCount && prefs.sound) {
-            playWebAudioBeep(prefs.volume);
-          }
-
-          // Se a IA desta conversa estiver ATIVA (no chat ou nos ativos salvos)
-          const iaAtiva = Boolean(chat?.iaAtiva || iaChatsAtivos.includes(remoteJid) || (chat && iaChatsAtivos.includes(chat.id)));
-          if (iaAtiva && ultimo && !ultimo.fromMe && !processedAiMessagesRef.current.has(ultimo.id)) {
-            processedAiMessagesRef.current.add(ultimo.id);
-            setTimeout(() => {
-              void responderComIa(
-                remoteJid,
-                chat?.nome || "Cliente",
-                chat?.tel || "",
-                uniqueHistory,
-                chat?.carro,
-                chat?.etapa
-              );
-            }, 300);
-          }
-
-          // Evita recriar estado e disparar re-render caso o histórico não tenha mudado (impede salto de scroll)
-          const currentMsgs = chat?.msgs || [];
-          const sameCount = currentMsgs.length === uniqueHistory.length;
-          const sameLastId = currentMsgs[currentMsgs.length - 1]?.id === ultimo?.id;
-          if (sameCount && sameLastId) {
-            return prev;
-          }
-
-          return prev.map((c) => {
-            if (c.id !== remoteJid && !c.aliases?.includes(remoteJid)) return c;
-            return {
-              ...c,
-              msgs: uniqueHistory.map((m) => ({
-                id: m.id,
-                kind: m.fromMe ? "vendedor" : "cliente",
-                text: m.text,
-                t: m.timestamp,
-                nome: m.fromMe ? "Você" : c.nome,
-                mediaType: m.mediaType,
-                mediaUrl: m.mediaUrl,
-                caption: m.caption,
-                fileName: m.fileName,
-                reaction: m.reaction,
-                quotedText: m.quotedText,
-                starred: m.starred,
-              })),
-            };
-          });
-        });
-      }
+      const history = await fetchEvoMessages({ data: { remoteJid, aliases: aliases.slice(0, 4), accountId: activeAccount.id, expectedInstance: instanceName } });
+      if (!activeRef.current) return;
+      setLista(prev => {
+        const chat = prev.find(c => c.id === remoteJid || c.aliases?.includes(remoteJid));
+        if (!chat) return prev;
+        const incoming: Mensagem[] = history.messages.map(message => ({
+          id: message.id, kind: message.fromMe ? 'vendedor' : 'cliente',
+          text: message.text, t: message.timestamp, sentAt: message.sentAt,
+          nome: message.fromMe ? 'Você' : chat.id.endsWith('@g.us') ? message.sender : chat.nome,
+          senderAvatar: message.senderAvatar,
+          remoteJid: message.remoteJid, participant: message.participant,
+          mediaType: message.mediaType, mediaUrl: message.mediaUrl, caption: message.caption,
+          fileName: message.fileName, quotedText: message.quotedText,
+        }));
+        const msgs = mergeWhatsAppHistory(chat.msgs, incoming, history.reactions);
+        const tel = history.phone || chat.tel;
+        const nextAliases = Array.from(new Set([...(chat.aliases ?? []), ...history.aliases]));
+        const aliasesChanged = nextAliases.length !== (chat.aliases?.length ?? 0);
+        if (msgs === chat.msgs && tel === chat.tel && !aliasesChanged) return prev;
+        if (silencioso && msgs.length > chat.msgs.length && prefs.sound) playWebAudioBeep(prefs.volume);
+        return prev.map(c => c === chat ? { ...c, msgs, tel, aliases: aliasesChanged ? nextAliases : c.aliases } : c);
+      });
     } catch (err) {
-      console.error("Erro ao carregar mensagens:", err);
+      if (activeRef.current) {
+        if (!silencioso) dispararPopup("Mensagens indisponíveis", err instanceof Error ? err.message : "Tente novamente.");
+        void carregarStatus();
+      }
     } finally {
-      if (!silencioso) {
+      syncingMessagesRef.current.delete(remoteJid);
+      if (activeRef.current && !silencioso) {
         setCarregandoMsgs(false);
         setTimeout(() => scrollToBottom(false, true), 40);
       }
     }
-  }, [fetchEvoMessages, setLista, prefs.sound, prefs.volume, activeAccount.instanceName, scrollToBottom]);
+  }, [fetchEvoMessages, setLista, prefs.sound, prefs.volume, activeAccount.id, instanceName, scrollToBottom, carregarStatus, dispararPopup]);
 
-  // Montagem e troca de conta: sincroniza status e chats da conta ativa
   useEffect(() => {
-    void carregarStatus();
+    activeRef.current = true;
+    return () => {
+      activeRef.current = false;
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        if (recorder.state !== 'inactive') recorder.stop();
+        recorder.stream.getTracks().forEach(track => track.stop());
+      }
+      if (timerGravacaoRef.current) clearInterval(timerGravacaoRef.current);
+    };
+  }, []);
+
+  const selecionarConversa = useCallback((id: string) => setSelId(id), []);
+  const selectedId = sel?.id;
+  const selectedAliases = sel?.aliases?.join(",") ?? "";
+
+  useEffect(() => {
     void sincronizarChats(true);
-  }, [carregarStatus, activeAccount.id, activeAccount.instanceName, sincronizarChats]);
-
-  // Ao trocar de conta, reseta a conversa selecionada para exibir os leads da conta atual
-  useEffect(() => {
-    setSelId("");
-  }, [activeAccount.id]);
-
-  // Seleciona conversa e zera não lidas imediatamente
-  const selecionarConversa = useCallback((id: string) => {
-    setSelId(id);
-    setLista((prev) =>
-      prev.map((c) => (c.id === id && c.naoLida > 0 ? { ...c, naoLida: 0 } : c))
-    );
-    void markEvoRead({ data: { remoteJid: id, instance: activeAccount.instanceName } }).catch(() => null);
-  }, [setLista, markEvoRead, activeAccount.instanceName]);
-
-  // Sempre que selId estiver selecionado, garante que mensagens não lidas fiquem zeradas
-  useEffect(() => {
-    if (selId) {
-      setLista((prev) => {
-        const item = prev.find((c) => c.id === selId);
-        if (item && item.naoLida > 0) {
-          return prev.map((c) => (c.id === selId ? { ...c, naoLida: 0 } : c));
-        }
-        return prev;
-      });
-      void markEvoRead({ data: { remoteJid: selId, instance: activeAccount.instanceName } }).catch(() => null);
-    }
-  }, [selId, setLista, markEvoRead, activeAccount.instanceName]);
-
-  // Ao trocar de conta, se selId não existir na lista da conta, foca na primeira conversa
-  useEffect(() => {
-    if (lista.length > 0 && (!selId || !lista.some((c) => c.id === selId))) {
-      selecionarConversa(lista[0]!.id);
-    }
-  }, [activeAccount.id, lista, selId, selecionarConversa]);
+    const timer = setInterval(() => void sincronizarChats(false, true), WHATSAPP_POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [sincronizarChats]);
 
   useEffect(() => {
-    if (initialId) selecionarConversa(initialId);
-  }, [initialId, selecionarConversa]);
+    if (!selectedId) return;
+    setLista(prev => prev.map(c => c.id === selectedId && c.naoLida > 0 ? { ...c, naoLida: 0 } : c));
+    void markEvoRead({ data: { remoteJid: selectedId, accountId: activeAccount.id, expectedInstance: instanceName } }).catch(() => null);
+  }, [selectedId, setLista, markEvoRead, activeAccount.id, instanceName]);
 
   useEffect(() => {
-    if (selId && selId.includes("@")) {
-      void carregarMensagens(selId, false);
-    }
-  }, [selId, carregarMensagens]);
-
-  // Polling a cada 3.5s para a conversa aberta
-  useEffect(() => {
-    if (!selId || !selId.includes("@")) return;
-    const interval = setInterval(() => {
-      void carregarMensagens(selId, true);
-    }, 3500);
-    return () => clearInterval(interval);
-  }, [selId, carregarMensagens]);
-
-  // Sincronização periódica em segundo plano (a cada 4s) para detectar novas mensagens e acionar IA na conta ativa
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void sincronizarChats(false, true);
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [activeAccount.id, activeAccount.instanceName, sincronizarChats]);
+    if (!selectedId) return;
+    const aliases = selectedAliases ? selectedAliases.split(",") : [];
+    void carregarMensagens(selectedId, false, aliases);
+    const timer = setInterval(() => void carregarMensagens(selectedId, true, aliases), WHATSAPP_POLL_INTERVAL);
+    return () => clearInterval(timer);
+  }, [selectedId, selectedAliases, carregarMensagens]);
 
   // Fecha menus ao clicar fora
   useEffect(() => {
@@ -983,7 +819,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
       // Fixadas primeiro
       if (a.fixada && !b.fixada) return -1;
       if (!a.fixada && b.fixada) return 1;
-      return 0;
+      return lastMessageAt(b) - lastMessageAt(a);
     });
   }, [lista, busca, filtroChip, filtroCaixa, filtroTag, filtroEtapa]);
 
@@ -1013,6 +849,18 @@ export function Inbox({ initialId }: { initialId?: string }) {
   }, [lista]);
 
   // Ações de Envio
+  const confirmarEnvio = (conversationId: string, localId: string, result: { key?: { id?: string; remoteJid?: string; participant?: string } } | null) => {
+    atualizarConversa(conversationId, conversation => {
+      const id = result?.key?.id;
+      const duplicate = conversation.msgs.some(message => message.id === id);
+      if (!id || duplicate) return { ...conversation, msgs: conversation.msgs.filter(message => message.id !== localId) };
+      const msgs = conversation.msgs.map(message => message.id === localId ? {
+        ...message, id, remoteJid: result?.key?.remoteJid || conversationId, participant: result?.key?.participant,
+      } : message);
+      return { ...conversation, msgs };
+    });
+  };
+
   const enviarTexto = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (enviando || !sel) return;
@@ -1046,7 +894,8 @@ export function Inbox({ initialId }: { initialId?: string }) {
     setMensagemRespondendo(null);
 
     const novaMsg: Mensagem = {
-      id: crypto.randomUUID(),
+      id: `pending:${crypto.randomUUID()}`,
+      sentAt: Date.now(),
       kind: "vendedor",
       text: t,
       t: hhmm(),
@@ -1067,14 +916,15 @@ export function Inbox({ initialId }: { initialId?: string }) {
     setTimeout(() => scrollToBottom(true), 40);
 
     try {
-      await sendEvoMsg({
+      const result = await sendEvoMsg({
         data: {
           number: sel.id,
           text: t,
           quotedId: quote?.id,
-          instance: activeAccount.instanceName,
+          accountId: activeAccount.id, expectedInstance: instanceName,
         },
       });
+      confirmarEnvio(sel.id, novaMsg.id, result);
       atualizarConversa(sel.id, (c) => ({
         ...c,
         log: [{ t: hhmm(), text: "Mensagem enviada com sucesso" }, ...c.log],
@@ -1094,6 +944,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
   const iniciarGravacaoAudio = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!activeRef.current) { stream.getTracks().forEach(track => track.stop()); return; }
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -1127,7 +978,8 @@ export function Inbox({ initialId }: { initialId?: string }) {
         const base64Audio = reader.result as string;
 
         const novaMsg: Mensagem = {
-          id: crypto.randomUUID(),
+          id: `pending:${crypto.randomUUID()}`,
+      sentAt: Date.now(),
           kind: "vendedor",
           nome: "Você",
           text: "🎙️ Áudio",
@@ -1146,14 +998,16 @@ export function Inbox({ initialId }: { initialId?: string }) {
         setTimeout(() => scrollToBottom(true), 40);
 
         try {
-          await sendEvoAudio({
+          const result = await sendEvoAudio({
             data: {
               number: sel.id,
               audio: base64Audio,
-              instance: activeAccount.instanceName,
+              accountId: activeAccount.id, expectedInstance: instanceName,
             },
           });
+          confirmarEnvio(sel.id, novaMsg.id, result);
         } catch (err: any) {
+          confirmarEnvio(sel.id, novaMsg.id, null);
           alert(`Erro ao enviar áudio: ${err.message || err}`);
         }
       };
@@ -1190,7 +1044,8 @@ export function Inbox({ initialId }: { initialId?: string }) {
     setDraft("");
 
     const novaMsg: Mensagem = {
-      id: crypto.randomUUID(),
+      id: `pending:${crypto.randomUUID()}`,
+      sentAt: Date.now(),
       kind: "vendedor",
       nome: "Você",
       text: legenda ? `📷 ${legenda}` : "📷 Imagem",
@@ -1210,7 +1065,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
     setTimeout(() => scrollToBottom(true), 40);
 
     try {
-      await sendEvoMedia({
+      const result = await sendEvoMedia({
         data: {
           number: sel.id,
           mediatype: "image",
@@ -1218,10 +1073,12 @@ export function Inbox({ initialId }: { initialId?: string }) {
           media: base64,
           caption: legenda,
           fileName: file.name,
-          instance: activeAccount.instanceName,
+          accountId: activeAccount.id, expectedInstance: instanceName,
         },
       });
+      confirmarEnvio(sel.id, novaMsg.id, result);
     } catch (err: any) {
+      confirmarEnvio(sel.id, novaMsg.id, null);
       alert(`Erro ao enviar imagem: ${err.message || err}`);
     }
   };
@@ -1234,7 +1091,8 @@ export function Inbox({ initialId }: { initialId?: string }) {
     setDocPrevia(null);
 
     const novaMsg: Mensagem = {
-      id: crypto.randomUUID(),
+      id: `pending:${crypto.randomUUID()}`,
+      sentAt: Date.now(),
       kind: "vendedor",
       nome: "Você",
       text: `📄 ${file.name}`,
@@ -1254,43 +1112,48 @@ export function Inbox({ initialId }: { initialId?: string }) {
     setTimeout(() => scrollToBottom(true), 40);
 
     try {
-      await sendEvoMedia({
+      const result = await sendEvoMedia({
         data: {
           number: sel.id,
           mediatype: "document",
           mimetype: file.type || "application/pdf",
           media: base64,
           fileName: file.name,
-          instance: activeAccount.instanceName,
+          accountId: activeAccount.id, expectedInstance: instanceName,
         },
       });
+      confirmarEnvio(sel.id, novaMsg.id, result);
     } catch (err: any) {
+      confirmarEnvio(sel.id, novaMsg.id, null);
       alert(`Erro ao enviar documento: ${err.message || err}`);
     }
   };
 
   // Reagir a Mensagem
   const aplicarReacao = async (msg: Mensagem, emoji: string) => {
-    if (!sel) return;
+    if (!sel || !msg.remoteJid) return;
+    const conversationId = sel.id;
+    const operation = `${conversationId}:${msg.id}`;
+    if (reactingRef.current.has(operation)) return;
+    reactingRef.current.add(operation);
     setReacaoMenuMsgId(null);
-
-    atualizarConversa(sel.id, (c) => ({
-      ...c,
-      msgs: c.msgs.map((m) => (m.id === msg.id ? { ...m, reaction: emoji } : m)),
-    }));
-
+    const value = msg.reactions?.find(reaction => reaction.actor === 'self')?.emoji === emoji ? '' : emoji;
+    const at = Date.now();
     try {
-      await sendEvolutionReaction({
+      await sendEvoReaction({
         data: {
-          remoteJid: sel.id,
-          messageId: msg.id,
-          fromMe: msg.kind === "vendedor",
-          reaction: emoji,
-          instance: activeAccount.instanceName,
+          remoteJid: msg.remoteJid, messageId: msg.id, fromMe: msg.kind === 'vendedor',
+          reaction: value, participant: msg.participant,
+          accountId: activeAccount.id, expectedInstance: instanceName,
         },
       });
-    } catch (err) {
-      console.error("Erro ao enviar reação:", err);
+      atualizarConversa(conversationId, c => ({ ...c, msgs: mergeWhatsAppHistory(c.msgs, [], [{
+        messageId: msg.id, actor: 'self', emoji: value, at, eventId: `local:${crypto.randomUUID()}`,
+      }]) }));
+    } catch (error) {
+      if (activeRef.current) dispararPopup('Não foi possível reagir', error instanceof Error ? error.message : 'Tente novamente.');
+    } finally {
+      reactingRef.current.delete(operation);
     }
   };
 
@@ -1445,7 +1308,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
                 backgroundColor: isSubconta ? "#a855f7" : "#22c55e",
               }}
             />
-            {activeAccount.nome} · Instância: {activeAccount.instanceName}
+            {activeAccount.nome} · Instância: {instanceName}
           </span>
         </div>
 
@@ -1597,7 +1460,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
             <button
               type="button"
               className="wa-rail-btn wa-status-btn"
-              title={`Status da Conexão (${activeAccount.instanceName})`}
+              title={`Status da Conexão (${instanceName})`}
               onClick={() => setModalAberto("connection")}
             >
               <LinkIcon size={19} />
@@ -1724,6 +1587,8 @@ export function Inbox({ initialId }: { initialId?: string }) {
             </button>
           </div>
 
+          {syncError && <p className="om-notice" role="alert">{syncError}</p>}
+
           {/* Lista de Conversas com Context Menu */}
           <div className="wa-chat-list">
             {conversasFiltradas.length === 0 ? (
@@ -1747,17 +1612,11 @@ export function Inbox({ initialId }: { initialId?: string }) {
                       setContextMenu({ x: e.clientX, y: e.clientY, conversa: c });
                     }}
                   >
-                    <div className="wa-avatar">
-                      {c.avatar ? (
-                        <img src={c.avatar} alt={c.nome} style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />
-                      ) : (
-                        iniciais(c.nome)
-                      )}
-                    </div>
+                    <WhatsAppAvatar name={c.nome} photo={c.avatar} />
                     <div className="wa-chat-copy">
                       <div className="wa-row-top">
                         <span className="wa-row-name">{c.nome}</span>
-                        <time className="wa-row-time">{c.data}</time>
+                        <time className="wa-row-time">{whatsappListTime(lastMessageAt(c))}</time>
                       </div>
 
                       <div className="wa-row-bottom">
@@ -1848,7 +1707,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
               </button>
               <div style={{ marginTop: 40, fontSize: 11, color: "var(--fg-3)", display: "flex", alignItems: "center", gap: 6 }}>
                 <LinkIcon size={13} />
-                Conexão local Evolution API · Instância {activeAccount.instanceName}
+                Conexão local Evolution API · Instância {instanceName}
               </div>
             </section>
           ) : (
@@ -1856,13 +1715,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
             <>
               {/* CABEÇALHO DO CHAT */}
               <header className="wa-chat-header">
-                <div className="wa-avatar" style={{ width: 40, height: 40 }}>
-                  {sel.avatar ? (
-                    <img src={sel.avatar} alt={sel.nome} style={{ width: "100%", height: "100%", borderRadius: "50%", objectFit: "cover" }} />
-                  ) : (
-                    iniciais(sel.nome)
-                  )}
-                </div>
+                <WhatsAppAvatar name={sel.nome} photo={sel.avatar} size={40} />
 
                 <button
                   type="button"
@@ -1871,14 +1724,14 @@ export function Inbox({ initialId }: { initialId?: string }) {
                 >
                   <strong>{sel.nome}</strong>
                   <span>
-                    {sel.tel} · {sel.etapa} {sel.arquivada ? "· Arquivada" : ""}
+                    {sel.id.endsWith("@g.us") ? "Grupo" : sel.tel || "Número indisponível"} · {sel.etapa} {sel.arquivada ? "· Arquivada" : ""}
                   </span>
                 </button>
 
                 {/* BOTÃO LIGAR/DESLIGAR IA NESTA CONVERSA */}
                 <button
                   type="button"
-                  onClick={() => alternarIaConversa(sel.id)}
+                  onClick={() => alternarIaConversa()}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -2051,19 +1904,21 @@ export function Inbox({ initialId }: { initialId?: string }) {
 
               {/* HISTÓRICO DE MENSAGENS */}
               <div className="wa-messages-area" ref={messagesAreaRef} onScroll={handleMessagesScroll}>
-                <div className="wa-day-divider">Hoje</div>
-
                 {sel.msgs.length === 0 ? (
                   <div style={{ textAlign: "center", margin: "auto", padding: 24, color: "var(--fg-3)", fontSize: 13 }}>
                     Nenhuma mensagem sincronizada nesta conversa ainda.<br />
                     Envie uma mensagem abaixo para iniciar o atendimento.
                   </div>
                 ) : (
-                  sel.msgs.map((m) => {
+                  sel.msgs.map((m, index) => {
+                    const day = whatsappDayKey(m.sentAt);
+                    const startsDay = index === 0 || day !== whatsappDayKey(sel.msgs[index - 1]?.sentAt);
+                    const divider = startsDay && <div className="wa-day-divider">{whatsappDayLabel(m.sentAt)}</div>;
                     if (m.kind === "nota") {
                       return (
+                        <React.Fragment key={m.id}>
+                        {divider}
                         <div
-                          key={m.id}
                           id={`msg-${m.id}`}
                           className="wa-msg-row internal-note"
                           style={{ display: "flex", justifyContent: "center", margin: "10px 0", width: "100%" }}
@@ -2089,6 +1944,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
                             <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{m.text}</div>
                           </div>
                         </div>
+                        </React.Fragment>
                       );
                     }
 
@@ -2096,12 +1952,19 @@ export function Inbox({ initialId }: { initialId?: string }) {
                     const isStarred = Boolean(m.starred);
 
                     return (
+                      <React.Fragment key={m.id}>
+                      {divider}
                       <div
-                        key={m.id}
                         id={`msg-${m.id}`}
-                        className={`wa-msg-row ${isMe ? "me" : ""}`}
+                        className={`wa-msg-row ${isMe ? "me" : ""} ${m.reactions?.some(reaction => reaction.emoji) ? "has-reactions" : ""}`}
                       >
                         <div className="wa-bubble">
+                          {!isMe && sel.id.endsWith("@g.us") && m.nome && (
+                            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                              <WhatsAppAvatar name={m.nome} photo={m.senderAvatar} size={20} />
+                              <strong>{m.nome}</strong>
+                            </div>
+                          )}
                           {/* Mensagem Citada */}
                           {m.quotedText && (
                             <div className="wa-quoted-message">
@@ -2192,27 +2055,18 @@ export function Inbox({ initialId }: { initialId?: string }) {
                             return <div className="wa-bubble-text">{cleanContent || rawText}</div>;
                           })()}
 
-                          {/* Reação aplicada */}
-                          {m.reaction && (
-                            <div
-                              style={{
-                                display: "inline-block",
-                                background: "var(--panel, #ffffff)",
-                                border: "1px solid var(--line, #e2e8e4)",
-                                borderRadius: 12,
-                                padding: "1px 5px",
-                                fontSize: 11,
-                                marginTop: 4,
-                              }}
-                            >
-                              {m.reaction}
-                            </div>
+                          {m.reactions?.some(reaction => reaction.emoji) && (
+                            <span className="wa-reaction-badge" aria-label="Reações à mensagem">
+                              {m.reactions.filter(reaction => reaction.emoji).map(reaction => (
+                                <span key={reaction.actor} title={reaction.actor === 'self' ? 'Você' : 'Contato'}>{reaction.emoji}</span>
+                              ))}
+                            </span>
                           )}
 
                           {/* Metadados (Hora e Ticks) */}
                           <div className="wa-bubble-meta">
                             {isStarred && <Star size={11} fill="#eab308" color="#eab308" />}
-                            <time>{m.t}</time>
+                            <time>{whatsappHour(m.sentAt)}</time>
                             {isMe && <span className="wa-checks read">✓✓</span>}
                           </div>
 
@@ -2231,6 +2085,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
                             <button
                               type="button"
                               title="Reagir"
+                              disabled={!m.remoteJid}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setReacaoMenuMsgId(m.id);
@@ -2285,6 +2140,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
                           )}
                         </div>
                       </div>
+                      </React.Fragment>
                     );
                   })
                 )}
@@ -2841,7 +2697,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
                     </div>
                     <button
                       type="button"
-                      onClick={() => alternarIaConversa(sel.id)}
+                      onClick={() => alternarIaConversa()}
                       style={{
                         backgroundColor: sel.iaAtiva ? "#22c55e" : "var(--bg-3, #e2e8e4)",
                         color: sel.iaAtiva ? "#ffffff" : "var(--fg-1)",
@@ -2980,7 +2836,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
                     <div style={{ display: "flex", gap: 6, paddingTop: 6, borderTop: "1px solid var(--border-subtle, rgba(0,0,0,0.06))" }}>
                       <button
                         type="button"
-                        onClick={() => atualizarConversa(sel.id, (c) => ({ ...c, etapa: "Ganho" }))}
+                        onClick={() => atualizarConversa(sel.id, (c) => ({ ...c, resultado: "Ganho", perda: null }))}
                         style={{
                           flex: 1,
                           padding: "4px 8px",
@@ -2988,8 +2844,8 @@ export function Inbox({ initialId }: { initialId?: string }) {
                           fontWeight: 700,
                           borderRadius: 6,
                           border: "none",
-                          backgroundColor: sel.etapa === "Ganho" ? "#16a34a" : "rgba(34, 197, 94, 0.15)",
-                          color: sel.etapa === "Ganho" ? "#ffffff" : "#16a34a",
+                          backgroundColor: sel.resultado === "Ganho" ? "#16a34a" : "rgba(34, 197, 94, 0.15)",
+                          color: sel.resultado === "Ganho" ? "#ffffff" : "#16a34a",
                           cursor: "pointer",
                         }}
                       >
@@ -3005,8 +2861,8 @@ export function Inbox({ initialId }: { initialId?: string }) {
                           fontWeight: 700,
                           borderRadius: 6,
                           border: "none",
-                          backgroundColor: sel.etapa === "Perdido" ? "#dc2626" : "rgba(239, 68, 68, 0.12)",
-                          color: sel.etapa === "Perdido" ? "#ffffff" : "#dc2626",
+                          backgroundColor: sel.resultado === "Perdido" ? "#dc2626" : "rgba(239, 68, 68, 0.12)",
+                          color: sel.resultado === "Perdido" ? "#ffffff" : "#dc2626",
                           cursor: "pointer",
                         }}
                       >
@@ -3189,7 +3045,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
           <button
             type="button"
             onClick={() => {
-              alternarIaConversa(contextMenu.conversa.id);
+              alternarIaConversa();
               setContextMenu(null);
             }}
           >
@@ -3897,6 +3753,11 @@ export function Inbox({ initialId }: { initialId?: string }) {
               </button>
             </div>
 
+            {!sel.id.endsWith('@g.us') && <div className="wa-form-group">
+              <label htmlFor="wa-contact-phone">Número do WhatsApp</label>
+              <input id="wa-contact-phone" type="tel" readOnly value={sel.tel || 'Número indisponível'} onFocus={event => event.currentTarget.select()} />
+            </div>}
+
             <div className="wa-form-group">
               <label>Etapa do Funil</label>
               <select
@@ -4023,7 +3884,7 @@ export function Inbox({ initialId }: { initialId?: string }) {
 
               <p style={{ fontSize: 13, color: "var(--fg-3)", maxWidth: 360, margin: "0 auto 16px" }}>
                 Conta: <strong>{activeAccount.nome}</strong> ({activeAccount.tipo})<br />
-                Instância ativa: <strong>{activeAccount.instanceName}</strong><br />
+                Instância ativa: <strong>{instanceName}</strong><br />
                 Total de conversas: <strong>{evoStatus?.chatsCount ?? 0}</strong>
               </p>
 
@@ -4032,7 +3893,6 @@ export function Inbox({ initialId }: { initialId?: string }) {
                 className="btn btn-primary btn-sm"
                 onClick={() => {
                   void carregarStatus();
-                  void sincronizarChats(false);
                 }}
               >
                 <RefreshCw size={13} /> Atualizar Conexão
@@ -4123,20 +3983,9 @@ export function Inbox({ initialId }: { initialId?: string }) {
                     }`;
                     atualizarConversa(sel.id, (c) => ({
                       ...c,
-                      etapa: "Perdido",
-                      status: "Encerrado",
-                      mensagens: [
-                        ...c.mensagens,
-                        {
-                          id: crypto.randomUUID(),
-                          de: "sistema",
-                          kind: "nota",
-                          texto: notaPerda,
-                          hora: hhmm(),
-                          status: "lida",
-                          data: "Hoje",
-                        },
-                      ],
+                      resultado: "Perdido",
+                      perda: motivoPerdaSelecionado,
+                      log: [{ t: hhmm(), text: notaPerda }, ...c.log],
                     }));
                     setModalPerdaAberto(false);
                     setDetalhesPerda("");

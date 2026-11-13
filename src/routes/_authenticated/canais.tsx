@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useServerFn } from '@tanstack/react-start';
 import {
   Plus,
@@ -23,12 +23,12 @@ import { PageHead, meta } from '@/components/pw';
 import { Field, Modal, PwButton } from '@/components/omega-ui';
 import { canais, type Canal } from '@/data/canais';
 import { useLocalDemo } from '@/lib/omega-local';
-import { useActiveAccount } from '@/lib/omega-accounts';
+import { useActiveAccount, type Subconta } from '@/lib/omega-accounts';
+import { useWhatsAppConnection } from '@/hooks/use-whatsapp-connection';
+import { whatsappErrorMessage, whatsappStatusLabel } from '@/lib/whatsapp-connection';
 import {
-  getEvolutionStatus,
   getEvolutionConnectQr,
   logoutEvolutionInstance,
-  type EvolutionStatusResponse,
   type EvolutionConnectResponse,
 } from '@/lib/evolution.functions';
 
@@ -38,7 +38,12 @@ export const Route = createFileRoute('/_authenticated/canais')({
 });
 
 function Canais() {
-  const { activeAccount, isSubconta } = useActiveAccount();
+  const { activeAccount } = useActiveAccount();
+  return <AccountChannels key={activeAccount.id} activeAccount={activeAccount} />;
+}
+
+function AccountChannels({ activeAccount }: { activeAccount: Subconta }) {
+  const isSubconta = activeAccount.id !== 'matriz';
   const [configs, setConfigs] = useLocalDemo<Record<string, Record<string, string>>>(
     `omega-demo-canais-${activeAccount.id}`,
     {}
@@ -48,121 +53,59 @@ function Canais() {
   const [picker, setPicker] = useState(false);
   const [saved, setSaved] = useState('');
 
-  // Estados da Evolution API / QR Code da conta/subconta ativa
-  const [evoStatus, setEvoStatus] = useState<EvolutionStatusResponse | null>(null);
+  const { status: evoStatus, error: statusError, refresh, markDisconnected } = useWhatsAppConnection(activeAccount.id);
   const [qrModalOpen, setQrModalOpen] = useState(false);
-  const [qrInstance, setQrInstance] = useState(activeAccount.instanceName);
   const [qrData, setQrData] = useState<EvolutionConnectResponse | null>(null);
   const [loadingQr, setLoadingQr] = useState(false);
   const [desconectando, setDesconectando] = useState(false);
   const [erroQr, setErroQr] = useState<string | null>(null);
-
-  const fetchEvoStatus = useServerFn(getEvolutionStatus);
   const fetchEvoConnect = useServerFn(getEvolutionConnectQr);
   const fetchEvoLogout = useServerFn(logoutEvolutionInstance);
+  const evoAtivo = evoStatus?.state === 'open';
+  const qrInstance = evoAtivo ? evoStatus.instance : qrData?.instance ?? evoStatus?.instance ?? activeAccount.instanceName;
+  const estadoExibido = statusError ? whatsappErrorMessage(statusError) : evoStatus ? whatsappStatusLabel[evoStatus.state] : 'Verificando conexão';
 
-  const carregarStatus = useCallback(
-    async (inst?: string) => {
-      const target = inst || activeAccount.instanceName;
-      try {
-        const st = await fetchEvoStatus({ data: { instance: target } });
-        setEvoStatus(st);
-        return st;
-      } catch (err: any) {
-        setEvoStatus({
-          configured: false,
-          state: 'close',
-          instance: target,
-          phone: null,
-          profilePicUrl: null,
-          count: 0,
-          contactsCount: 0,
-          chatsCount: 0,
-          error: err?.message,
-        });
-        return null;
-      }
-    },
-    [fetchEvoStatus, activeAccount.instanceName]
-  );
-
-  // Recarrega status e instância sempre que a conta ativa mudar
-  useEffect(() => {
-    setQrInstance(activeAccount.instanceName);
-    setEvoStatus(null);
-    setQrData(null);
+  async function carregarQr() {
+    if (loadingQr || desconectando) return;
+    setLoadingQr(true);
     setErroQr(null);
-    void carregarStatus(activeAccount.instanceName);
-  }, [activeAccount.id, activeAccount.instanceName, carregarStatus]);
+    setQrData(null);
+    try {
+      const result = await fetchEvoConnect({ data: { accountId: activeAccount.id } });
+      setQrData(result);
+      if (result.error) setErroQr(result.error);
+      await refresh();
+    } catch (error) {
+      setErroQr(error instanceof Error ? error.message : 'Falha ao gerar o QR Code.');
+    } finally {
+      setLoadingQr(false);
+    }
+  }
 
-  const carregarQr = useCallback(
-    async (instName?: string, forceNew = false) => {
-      setLoadingQr(true);
-      setErroQr(null);
-      const targetInst = instName || activeAccount.instanceName;
-      try {
-        // Primeiro checa status atual da instância
-        const st = await fetchEvoStatus({ data: { instance: targetInst } });
-        setEvoStatus(st);
-
-        if (st.state === 'open' && !forceNew) {
-          setQrData({ state: 'open', instance: targetInst });
-          setLoadingQr(false);
-          return;
-        }
-
-        const res = await fetchEvoConnect({ data: { instance: targetInst, forceNew } });
-        setQrData(res);
-        if (res.error) setErroQr(res.error);
-      } catch (err: any) {
-        setErroQr(err?.message || 'Falha ao obter QR Code da Evolution API');
-      } finally {
-        setLoadingQr(false);
-      }
-    },
-    [fetchEvoStatus, fetchEvoConnect, activeAccount.instanceName]
-  );
-
-  const desconectarEGerarQr = async (instName?: string) => {
+  async function desconectar() {
+    if (desconectando || loadingQr) return;
     setDesconectando(true);
     setErroQr(null);
-    const targetInst = instName || activeAccount.instanceName;
     try {
-      await fetchEvoLogout({ data: { instance: targetInst } });
-      setEvoStatus(null);
-      await carregarQr(targetInst, true);
-    } catch (err: any) {
-      setErroQr(err?.message || 'Erro ao desconectar instância');
+      await fetchEvoLogout({ data: { accountId: activeAccount.id, expectedInstance: qrInstance } });
+      setQrData(null);
+      await markDisconnected(qrInstance);
+    } catch (error) {
+      setErroQr(error instanceof Error ? error.message : 'Falha ao desconectar o WhatsApp.');
     } finally {
       setDesconectando(false);
     }
-  };
+  }
 
-  // Polling automático enquanto o modal de QR Code estiver aberto e aguardando conexão
-  useEffect(() => {
-    if (!qrModalOpen) return;
-    if (evoStatus?.state === 'open') return;
-
-    const target = qrInstance || activeAccount.instanceName;
-    const timer = setInterval(async () => {
-      try {
-        const st = await fetchEvoStatus({ data: { instance: target } });
-        setEvoStatus(st);
-        if (st.state === 'open') {
-          setQrData({ state: 'open', instance: target });
-          clearInterval(timer);
-        }
-      } catch {}
-    }, 3500);
-
-    return () => clearInterval(timer);
-  }, [qrModalOpen, evoStatus?.state, qrInstance, activeAccount.instanceName, fetchEvoStatus]);
+  function abrirConexao() {
+    setQrModalOpen(true);
+    setErroQr(null);
+    if (!evoAtivo) void carregarQr();
+  }
 
   const abrir = (c: Canal) => {
     if (c.id === 'wa_extra') {
-      setQrInstance(activeAccount.instanceName);
-      setQrModalOpen(true);
-      void carregarQr(activeAccount.instanceName, false);
+      abrirConexao();
       setPicker(false);
       return;
     }
@@ -170,8 +113,6 @@ function Canais() {
     setEdit(c);
     setPicker(false);
   };
-
-  const evoAtivo = evoStatus?.configured && evoStatus?.state === 'open';
 
   return (
     <AppShell crumb="Canais" section="Automação">
@@ -195,7 +136,7 @@ function Canais() {
           </span>
         ) : (
           <span className="pill is-warn">
-            WhatsApp {activeAccount.nome} Pendente ({activeAccount.instanceName})
+            {estadoExibido} · {activeAccount.tipo}
           </span>
         )}
       </div>
@@ -223,7 +164,7 @@ function Canais() {
             isEvo && evoAtivo
               ? `Conectado · ${evoStatus?.instance}`
               : isEvo
-              ? `Desconectado · QR Code (${activeAccount.instanceName})`
+              ? estadoExibido
               : c.id === 'tiktok'
               ? 'Em breve'
               : configs[c.id]
@@ -232,9 +173,9 @@ function Canais() {
 
           const descExibicao =
             isEvo && evoAtivo
-              ? `Conexão direta com a Evolution API (${activeAccount.instanceName}). ${evoStatus?.count?.toLocaleString('pt-BR')} mensagens registradas.`
+              ? `Conexão direta com a Evolution API (${qrInstance}). ${evoStatus?.count?.toLocaleString('pt-BR')} mensagens registradas.`
               : isEvo
-              ? `Conexão exclusiva via QR Code para ${activeAccount.nome} (instância: ${activeAccount.instanceName}).`
+              ? `Conexão exclusiva via QR Code para ${activeAccount.nome} (instância: ${qrInstance}).`
               : c.desc;
 
           return (
@@ -258,7 +199,7 @@ function Canais() {
               )}
               {isEvo && !evoAtivo && (
                 <span className="t-caption" style={{ color: 'var(--fg-3)' }}>
-                  Instância: <strong>{activeAccount.instanceName}</strong> (aguardando QR Code)
+                  Instância: <strong>{qrInstance}</strong>
                 </span>
               )}
               {!isEvo && configs[c.id] && <span className="t-caption">{Object.values(configs[c.id] ?? {})[0]}</span>}
@@ -268,11 +209,7 @@ function Canais() {
                   <>
                     <PwButton
                       tone={evoAtivo ? 'outline' : 'primary'}
-                      onClick={() => {
-                        setQrInstance(activeAccount.instanceName);
-                        setQrModalOpen(true);
-                        void carregarQr(activeAccount.instanceName, false);
-                      }}
+                      onClick={abrirConexao}
                     >
                       <QrCode size={14} />
                       {evoAtivo ? 'Conexão & QR Code' : 'Conectar via QR Code'}
@@ -343,27 +280,11 @@ function Canais() {
               </span>
             </div>
 
-            {/* Seletor / Campo da Instância */}
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <div style={{ flex: 1 }}>
-                <Field label="Nome da Instância Evolution para esta conta">
-                  <input
-                    className="input"
-                    value={qrInstance}
-                    onChange={(e) => setQrInstance(e.target.value)}
-                    placeholder={activeAccount.instanceName}
-                  />
-                </Field>
-              </div>
-              <PwButton
-                type="button"
-                onClick={() => void carregarQr(qrInstance, false)}
-                disabled={loadingQr}
-                title="Atualizar status ou gerar QR"
-              >
-                <RefreshCw size={14} />
-                {loadingQr ? 'Carregando…' : 'Atualizar'}
+            <div className="om-toolbar">
+              <PwButton type="button" onClick={() => evoAtivo ? void refresh() : void carregarQr()} disabled={loadingQr || desconectando}>
+                <RefreshCw size={14} /> {evoAtivo ? 'Atualizar status' : 'Gerar QR Code'}
               </PwButton>
+              {evoStatus?.state === 'connecting' && <PwButton type="button" disabled={loadingQr || desconectando} onClick={() => void desconectar()}>Desconectar sessão</PwButton>}
             </div>
 
             {/* Mensagem de Erro (se houver) */}
@@ -427,11 +348,11 @@ function Canais() {
                   <PwButton
                     type="button"
                     disabled={desconectando}
-                    onClick={() => void desconectarEGerarQr(qrInstance)}
+                    onClick={() => void desconectar()}
                     style={{ color: '#dc2626', borderColor: '#fca5a5' }}
                   >
                     <LogOut size={14} />
-                    {desconectando ? 'Desconectando…' : 'Desconectar e Ler Novo QR'}
+                    {desconectando ? 'Desconectando…' : 'Desconectar WhatsApp'}
                   </PwButton>
                 </div>
               </div>
@@ -517,7 +438,7 @@ function Canais() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                       <PwButton
                         type="button"
-                        onClick={() => void carregarQr(qrInstance, true)}
+                        onClick={() => void carregarQr()}
                         disabled={loadingQr}
                       >
                         <RefreshCw size={14} /> Atualizar QR Code
@@ -535,7 +456,7 @@ function Canais() {
                     <PwButton
                       tone="primary"
                       type="button"
-                      onClick={() => void carregarQr(qrInstance, true)}
+                      onClick={() => void carregarQr()}
                       disabled={loadingQr}
                     >
                       <QrCode size={14} /> Gerar QR Code para {activeAccount.nome}

@@ -765,3 +765,11 @@ dl.om-vz-summary { grid-template-columns:95px minmax(0,1fr); }
 .crm-pagination { justify-content: flex-end; }
 .crm-pagination > span { margin-right: auto; }
 @media (max-width: 600px) { .crm-form-grid { grid-template-columns: 1fr; } .crm-account { max-width: 160px; } .crm-toolbar > * { width: 100%; } }
+.wa-connection-empty {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  width: min(100%, 560px);
+  padding: 24px;
+  margin: 16px auto;
+}

@@ -18,7 +18,7 @@ import {
 } from "@/lib/crm/contacts";
 import { crmRpc } from "@/lib/crm/gateway";
 import { aiSuggestionInput } from "@/lib/crm/ai-policy";
-import { resolveLegacyInstance, requireLegacyIntegrationAdmin } from "@/lib/crm/legacy-access";
+import { requireLegacyIntegrationAdmin } from "@/lib/crm/legacy-access";
 
 const tenant = "11111111-1111-4111-8111-111111111111";
 const user = "22222222-2222-4222-8222-222222222222";
@@ -212,12 +212,6 @@ describe("Contrato do servidor: sem sucesso fictício", () => {
 });
 
 describe("Integrações legadas e IA", () => {
-  it("rejeita instância arbitrária e configuração ausente", () => {
-    expect(resolveLegacyInstance("matriz", "matriz")).toBe("matriz");
-    expect(() => resolveLegacyInstance("franquia", "matriz")).toThrow("autorizada");
-    expect(() => resolveLegacyInstance(undefined, undefined)).toThrow();
-    expect(() => resolveLegacyInstance("../x", "../x")).toThrow();
-  });
   it("metadados do perfil não concedem acesso administrativo", async () => {
     const client = {
       auth: {
@@ -242,6 +236,13 @@ describe("Integrações legadas e IA", () => {
         user,
       ),
     ).rejects.toThrow("restrita");
+  });
+  it("nega acesso a uma conta confirmada sem papel de integração", async () => {
+    const client = {
+      auth: { getUser: async () => ({ data: { user: { id: user, email_confirmed_at: '2026-01-01' } }, error: null }) },
+      from: () => ({ select: () => ({ eq: async () => ({ data: [], error: null }) }) }),
+    };
+    await expect(requireLegacyIntegrationAdmin(client as unknown as Parameters<typeof requireLegacyIntegrationAdmin>[0], user)).rejects.toThrow('restrita');
   });
   it("recusa papéis system e históricos excessivos enviados pelo navegador", () => {
     expect(
