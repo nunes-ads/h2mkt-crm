@@ -120,3 +120,4 @@ export async function ensureAllEvolutionWebhooks(): Promise<EvolutionWebhookInfo
 
   return results;
 }
+
