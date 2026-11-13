@@ -7,6 +7,7 @@ import { whatsappAccountId, type WhatsAppAccountId, type WhatsAppConnectionState
 import { resolveEvolutionInstance, readEvolutionState, requireEvolutionConnection, listEvolutionInstances, selectEvolutionInstance, needsFreshPairing, requireExpectedInstance } from './evolution-connection.server';
 import { whatsappDate, whatsappHour, whatsappTimestamp } from './whatsapp-time';
 import { whatsappContactProfile, whatsappName, whatsappPhoto, whatsappProfileKey, type WhatsAppProfile } from './whatsapp-profiles';
+import { ensureAllEvolutionWebhooks } from './crm/evolution-webhook.server';
 
 type ProfileConfig = { url: string; key: string; instance: string };
 const contactsCache = new Map<string, { expires: number; value: Promise<Map<string, WhatsAppProfile>> }>();
@@ -135,6 +136,9 @@ export const getEvolutionStatus = createServerFn({ method: 'POST' })
     await requireLegacyIntegrationAdmin(context.supabase, context.userId);
     const config = await getEvolutionConfig(data?.accountId);
     const state = await readEvolutionState(config);
+    if (state === 'open') {
+      void ensureAllEvolutionWebhooks().catch(() => undefined);
+    }
     const metadata = state === 'open' ? config.metadata : undefined;
     const phone = metadata?.ownerJid?.split('@')[0];
     return {
@@ -145,6 +149,13 @@ export const getEvolutionStatus = createServerFn({ method: 'POST' })
       contactsCount: metadata?._count?.Contact ?? 0,
       chatsCount: metadata?._count?.Chat ?? 0,
     };
+  });
+
+export const syncEvolutionWebhook = createServerFn({ method: 'POST' })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    await requireLegacyIntegrationAdmin(context.supabase, context.userId);
+    return await ensureAllEvolutionWebhooks();
   });
 
 export type EvolutionConnectResponse = {

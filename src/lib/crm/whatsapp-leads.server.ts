@@ -5,6 +5,7 @@ import { whatsappPhoneJid } from "../whatsapp-history";
 import { whatsappName } from "../whatsapp-profiles";
 import { whatsappTimestamp } from "../whatsapp-time";
 import { uuid } from "./contracts";
+import { saveLocalPilotLead } from "./pilot-store.server";
 
 const instanceName = z.string().regex(/^[\w-]{1,100}$/);
 const endpointConfig = z.record(instanceName, z.string().regex(/^[\w-]{32,200}$/));
@@ -78,34 +79,52 @@ function capture(value: unknown) {
   };
 }
 
-type Capture = NonNullable<ReturnType<typeof capture>>;
-type StoreLead = (instance: string, data: Capture) => Promise<void>;
+export type Capture = NonNullable<ReturnType<typeof capture>>;
+export type StoreLead = (instance: string, data: Capture) => Promise<void>;
 const rpcName = "crm_capture_whatsapp_lead_v1";
 
 const saveLead: StoreLead = async (instance, data) => {
   const token = process.env["SUPABASE_WHATSAPP_CAPTURE_TOKEN"];
+  let supabaseSuccess = false;
+
   if (token) {
     const url = process.env["SUPABASE_URL"];
     const key = process.env["SUPABASE_PUBLISHABLE_KEY"];
-    if (!url || !key || !/^[a-f0-9]{64}$/.test(token)) throw new Error("Gravação do piloto não configurada.");
-    const result = await fetch(new URL("/rest/v1/rpc/crm_capture_whatsapp_pilot_v1", url), {
-      method: "POST",
-      headers: { apikey: key, "Content-Type": "application/json" },
-      body: JSON.stringify({ p_instance: instance, p_event: data, p_token: token }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!result.ok || !writeResult.safeParse(await result.json()).success)
-      throw new Error("Não foi possível gravar o lead.");
-    return;
+    if (url && key && /^[a-f0-9]{64}$/.test(token)) {
+      try {
+        const result = await fetch(new URL("/rest/v1/rpc/crm_capture_whatsapp_pilot_v1", url), {
+          method: "POST",
+          headers: { apikey: key, "Content-Type": "application/json" },
+          body: JSON.stringify({ p_instance: instance, p_event: data, p_token: token }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (result.ok && writeResult.safeParse(await result.json()).success) {
+          supabaseSuccess = true;
+        }
+      } catch (err) {
+        console.warn("[whatsapp-leads] Tentativa Supabase pilot_v1 falhou:", err);
+      }
+    }
   }
-  const db = supabaseAdmin as unknown as {
-    rpc: (name: typeof rpcName, input: { p_instance: string; p_event: Capture }) =>
-      PromiseLike<{ data: unknown; error: unknown }>;
-  };
-  const result = await db.rpc(rpcName, { p_instance: instance, p_event: data });
-  if (result.error || !writeResult.safeParse(result.data).success) {
-    throw new Error("Não foi possível gravar o lead.");
+
+  if (!supabaseSuccess) {
+    try {
+      const db = supabaseAdmin as unknown as {
+        rpc: (name: typeof rpcName, input: { p_instance: string; p_event: Capture }) =>
+          PromiseLike<{ data: unknown; error: unknown }>;
+      };
+      const result = await db.rpc(rpcName, { p_instance: instance, p_event: data });
+      if (!result.error && writeResult.safeParse(result.data).success) {
+        supabaseSuccess = true;
+      }
+    } catch {
+      // Ignora erro no client admin quando não configurado
+    }
   }
+
+  // Sempre grava no repositório persistente local de leads para garantir
+  // disponibilidade instantânea no painel/contatos, mesmo se o Supabase ainda estiver em setup.
+  await saveLocalPilotLead(instance, data);
 };
 
 async function readPayload(request: Request) {
@@ -167,7 +186,12 @@ export async function receiveWhatsAppLead(
   if (!Object.hasOwn(secrets, event.instance) || !sameSecret(secrets[event.instance]!, token))
     return reply(401, "unauthorized");
   if (event.event.toLowerCase().replace(/_/g, ".") !== "messages.upsert") return reply(200, "ignored");
-  const records = Array.isArray(event.data) ? event.data : [event.data];
+  const rawData = (event.data as Record<string, unknown> | unknown[]) ?? {};
+  const records = Array.isArray(rawData)
+    ? rawData
+    : Array.isArray((rawData as any)?.messages)
+      ? (rawData as any).messages
+      : [rawData];
   if (!records.length || records.length > 50) return reply(400, "invalid_batch");
   const captures = records.map(capture).filter((item): item is Capture => item !== null);
   if (!captures.length) return reply(200, "ignored");

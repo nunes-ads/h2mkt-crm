@@ -75,6 +75,26 @@ function isH3SwallowedErrorBody(body: string): boolean {
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     applyEnvDefaults(env);
+    
+    // Rota de recepção do webhook da Evolution API
+    try {
+      const url = new URL(request.url);
+      const path = url.pathname.replace(/\/+$/, "");
+      if (path === "/api/webhooks/evolution" || path === "/api/webhook/evolution" || path === "/api/webhook/whatsapp") {
+        if (request.method === "GET") {
+          return Response.json({
+            status: "ready",
+            service: "evolution-webhook",
+            instances: ["teste-local--crm-1", "franquia-asasul"],
+          });
+        }
+        const { receiveWhatsAppLead } = await import("./lib/crm/whatsapp-leads.server");
+        return await receiveWhatsAppLead(request);
+      }
+    } catch (routeErr) {
+      console.error("[server.ts] Erro ao processar rota de webhook:", routeErr);
+    }
+
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);

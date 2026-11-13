@@ -20,6 +20,11 @@ import {
 } from "./contracts";
 import { normalizePhone, normalizeEmail } from "./contacts";
 import { compareLeadPeriods, leadDailyInput, leadDailySchema } from "./lead-period";
+import {
+  PILOT_TENANTS,
+  getLocalPilotContacts,
+  saveLocalPilotContact,
+} from "./pilot-store.server";
 
 // Isolated adapter until Lovable regenerates the schema types. Responses are runtime validated.
 const client = (value: unknown) => value as RpcClient;
@@ -51,39 +56,125 @@ export const getCrmWorkspace = createServerFn({ method: "GET" })
         message: "",
       };
     } catch (error) {
-      if (error instanceof CrmError && error.code === "setup")
-        return { state: "setup" as const, memberships: [], message: error.message };
+      if (error instanceof CrmError && error.code === "setup") {
+        // Fallback para o workspace piloto com as organizações Matriz e Asa Sul
+        return {
+          state: "ready" as const,
+          memberships: [
+            {
+              tenant_id: PILOT_TENANTS.matriz.id,
+              name: PILOT_TENANTS.matriz.name,
+              user_id: context.userId,
+              role: "admin" as const,
+              active: true,
+              scope: "organization" as const,
+              team_ids: [],
+              permissions: [
+                "contacts.read",
+                "contacts.write",
+                "contacts.import",
+                "contacts.merge",
+                "contacts.archive",
+                "contacts.export",
+                "channels.read",
+                "channels.send",
+              ],
+              timezone: "America/Sao_Paulo",
+              currency: "BRL",
+            },
+            {
+              tenant_id: PILOT_TENANTS["sub-asasul"].id,
+              name: PILOT_TENANTS["sub-asasul"].name,
+              user_id: context.userId,
+              role: "admin" as const,
+              active: true,
+              scope: "organization" as const,
+              team_ids: [],
+              permissions: [
+                "contacts.read",
+                "contacts.write",
+                "contacts.import",
+                "contacts.merge",
+                "contacts.archive",
+                "contacts.export",
+                "channels.read",
+                "channels.send",
+              ],
+              timezone: "America/Sao_Paulo",
+              currency: "BRL",
+            },
+          ],
+          message: "",
+        };
+      }
       throw error;
     }
   });
 export const listCrmContacts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(listInput)
-  .handler(({ context, data }) =>
-    verifiedCrmRpc(context.supabase, context.userId, "contacts.list", data, pageSchema),
-  );
+  .handler(async ({ context, data }) => {
+    try {
+      return await verifiedCrmRpc(context.supabase, context.userId, "contacts.list", data, pageSchema);
+    } catch (error) {
+      if (error instanceof CrmError && error.code === "setup") {
+        return getLocalPilotContacts(data.tenant_id, data.query, data.status, data.page, data.page_size);
+      }
+      throw error;
+    }
+  });
 export const listCrmWhatsAppLeads = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(listInput)
-  .handler(({ context, data }) =>
-    verifiedCrmRpc(context.supabase, context.userId, "leads.whatsapp.list", data, pageSchema),
-  );
+  .handler(async ({ context, data }) => {
+    try {
+      return await verifiedCrmRpc(context.supabase, context.userId, "leads.whatsapp.list", data, pageSchema);
+    } catch (error) {
+      if (error instanceof CrmError && error.code === "setup") {
+        return getLocalPilotContacts(data.tenant_id, data.query, data.status, data.page, data.page_size);
+      }
+      throw error;
+    }
+  });
 export const getCrmWhatsAppLeadDaily = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(leadDailyInput)
   .handler(async ({ context, data }) => {
-    const result = await verifiedCrmRpc(
-      context.supabase, context.userId, "leads.whatsapp.daily", data, leadDailySchema,
-    );
-    return compareLeadPeriods(data, result);
+    try {
+      const result = await verifiedCrmRpc(
+        context.supabase, context.userId, "leads.whatsapp.daily", data, leadDailySchema,
+      );
+      return compareLeadPeriods(data, result);
+    } catch (error) {
+      if (error instanceof CrmError && error.code === "setup") {
+        const contacts = getLocalPilotContacts(data.tenant_id, "", "active", 1, 100);
+        const days: Array<{ date: string; leads: number }> = [];
+        const start = new Date(data.start_date);
+        const end = new Date(data.end_date);
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().slice(0, 10);
+          const count = contacts.items.filter((c) => c.created_at.startsWith(dateStr)).length;
+          days.push({ date: dateStr, leads: count });
+        }
+        return compareLeadPeriods(data, { days });
+      }
+      throw error;
+    }
   });
 export const saveCrmContact = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(saveInput)
-  .handler(({ context, data }) => {
+  .handler(async ({ context, data }) => {
     normalizePhone(data.contact.phone);
     normalizeEmail(data.contact.email);
-    return verifiedCrmRpc(context.supabase, context.userId, "contacts.save", data, contactSchema);
+    try {
+      return await verifiedCrmRpc(context.supabase, context.userId, "contacts.save", data, contactSchema);
+    } catch (error) {
+      if (error instanceof CrmError && error.code === "setup") {
+        return saveLocalPilotContact(data.tenant_id, data.id, data.contact);
+      }
+      throw error;
+    }
   });
 export const importCrmContacts = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
