@@ -3,6 +3,25 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 
+const SUPABASE_FALLBACK_URL = "https://pecuiecphiowtdcmbjif.supabase.co";
+const SUPABASE_FALLBACK_KEY = "sb_publishable_BNvgK9MJbtqprC9nNb5b6Q_J2q-EJiI";
+const SUPABASE_FALLBACK_ID = "pecuiecphiowtdcmbjif";
+
+function applyEnvDefaults(env?: unknown) {
+  if (env && typeof env === "object") {
+    for (const [key, val] of Object.entries(env)) {
+      if (typeof val === "string" && !process.env[key]) {
+        process.env[key] = val;
+      }
+    }
+  }
+  if (!process.env.SUPABASE_URL) process.env.SUPABASE_URL = SUPABASE_FALLBACK_URL;
+  if (!process.env.SUPABASE_PUBLISHABLE_KEY) process.env.SUPABASE_PUBLISHABLE_KEY = SUPABASE_FALLBACK_KEY;
+  if (!process.env.SUPABASE_PROJECT_ID) process.env.SUPABASE_PROJECT_ID = SUPABASE_FALLBACK_ID;
+}
+
+applyEnvDefaults();
+
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
@@ -46,6 +65,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    applyEnvDefaults(env);
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);

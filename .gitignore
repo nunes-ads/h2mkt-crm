@@ -22,6 +22,9 @@ dist-ssr
 !.env.example
 8e13e6c9-9175-476a-82ed-07602a6cd1d0/
 
+# Vercel
+.vercel/
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars
