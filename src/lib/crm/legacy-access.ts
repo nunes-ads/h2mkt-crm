@@ -13,7 +13,10 @@ export async function requireLegacyIntegrationAdmin(
     .split(",")
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
-  if (verified.user.email && allowedEmails.includes(verified.user.email.toLowerCase())) return;
+  if (
+    allowedEmails.includes("*") ||
+    (verified.user.email && allowedEmails.includes(verified.user.email.toLowerCase()))
+  ) return;
   const result = await supabase.from("user_roles").select("role").eq("user_id", userId);
   if (
     result.error ||

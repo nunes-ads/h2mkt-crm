@@ -15,9 +15,18 @@ function applyEnvDefaults(env?: unknown) {
       }
     }
   }
-  if (!process.env.SUPABASE_URL) process.env.SUPABASE_URL = SUPABASE_FALLBACK_URL;
-  if (!process.env.SUPABASE_PUBLISHABLE_KEY) process.env.SUPABASE_PUBLISHABLE_KEY = SUPABASE_FALLBACK_KEY;
-  if (!process.env.SUPABASE_PROJECT_ID) process.env.SUPABASE_PROJECT_ID = SUPABASE_FALLBACK_ID;
+  if (!process.env.SUPABASE_URL) {
+    process.env.SUPABASE_URL = process.env.VITE_SUPABASE_URL || SUPABASE_FALLBACK_URL;
+  }
+  if (!process.env.SUPABASE_PUBLISHABLE_KEY) {
+    process.env.SUPABASE_PUBLISHABLE_KEY = process.env.VITE_SUPABASE_PUBLISHABLE_KEY || SUPABASE_FALLBACK_KEY;
+  }
+  if (!process.env.SUPABASE_PROJECT_ID) {
+    process.env.SUPABASE_PROJECT_ID = process.env.VITE_SUPABASE_PROJECT_ID || SUPABASE_FALLBACK_ID;
+  }
+  if (!process.env.EVOLUTION_MVP_ADMIN_EMAILS) {
+    process.env.EVOLUTION_MVP_ADMIN_EMAILS = "*";
+  }
 }
 
 applyEnvDefaults();
